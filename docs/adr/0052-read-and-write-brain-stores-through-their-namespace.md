@@ -135,7 +135,8 @@ flowchart LR
   here, and a machine without brain is untouched.
 - **Support `b9s web`.** Not now. The web server opens one project from a
   folder or database and has no store identity, so it leaves stores out of its
-  header rather than serve them unscoped.
+  header and refuses to start in a store's folder, rather than serve a store
+  unscoped.
 
 ## Consequences
 

@@ -178,3 +178,21 @@ func TestChooseStartupProjectNeverOpensARecentStoreAsAFolder(t *testing.T) {
 		t.Fatal("there is nothing else to fall back to")
 	}
 }
+
+func TestWebRefusesABrainStoreFolder(t *testing.T) {
+	task, _ := brainHome(t)
+	var stderr bytes.Buffer
+	if !refuseBrainStoreForWeb(task, &stderr) {
+		t.Fatal("b9s web in a store's folder would serve the whole shared database")
+	}
+	if !strings.Contains(stderr.String(), "brain store task") {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+	if refuseBrainStoreForWeb(t.TempDir(), &bytes.Buffer{}) {
+		t.Error("an ordinary folder is served as before")
+	}
+	t.Setenv(brain.EnvMode, "off")
+	if refuseBrainStoreForWeb(task, &bytes.Buffer{}) {
+		t.Error("B9S_BRAIN=off restores the old behaviour")
+	}
+}

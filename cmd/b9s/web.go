@@ -114,6 +114,9 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 	applyMemoryLever(appCfg)
 	startupBeadsDir, _ := loader.GetBeadsDir("")
 	startupDir := filepath.Dir(startupBeadsDir)
+	if refuseBrainStoreForWeb(startupDir, stderr) {
+		return 2
+	}
 	// Never fall back to another project: a server started in the wrong
 	// folder must fail rather than serve other data to a phone.
 	choice, err := chooseStartupProject(filepath.Base(startupDir), startupDir, nil, nil, &appCfg, false, datasource.OpenProject)
