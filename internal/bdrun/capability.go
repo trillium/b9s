@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vanderheijden86/b9s/pkg/debug"
@@ -82,6 +83,32 @@ func probeHelp(ctx context.Context, bdPath, dir string, args []string) (stdout s
 		return "", false, false
 	}
 	return outBuf.String(), err == nil, true
+}
+
+// brainProbes remembers, per bd path, whether the binary is brain's.
+var brainProbes sync.Map // string -> bool
+
+// ProbeBrain reports whether bdPath is brain's bd rather than upstream Beads,
+// judged from the --wide flag only brain's fork adds to every command. Upstream
+// bd ignores the BD_NAME and BEADS_DIR a brain store is pinned with, so a write
+// through it would land in the shared database without the store's checks. An
+// inconclusive probe (a timeout) answers false and is not remembered.
+func ProbeBrain(ctx context.Context, bdPath string) bool {
+	if v, ok := brainProbes.Load(bdPath); ok {
+		return v.(bool)
+	}
+	dir, err := os.MkdirTemp("", "b9s-bd-probe-")
+	if err != nil {
+		debug.Log("bdrun: probe temp dir: %v", err)
+		return false
+	}
+	defer os.RemoveAll(dir)
+	out, ok, conclusive := probeHelp(ctx, bdPath, dir, []string{"--help"})
+	brain := ok && strings.Contains(out, "--wide")
+	if conclusive {
+		brainProbes.Store(bdPath, brain)
+	}
+	return brain
 }
 
 func withoutWorkspaceEnv(env []string) []string {

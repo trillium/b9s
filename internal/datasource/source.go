@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/pkg/loader"
 )
 
@@ -76,6 +77,9 @@ type DataSource struct {
 	Database string `json:"database,omitempty"`
 	// User is the Dolt connection user (only used for SourceTypeDolt)
 	User string `json:"user,omitempty"`
+	// Brain limits a Dolt read to one brain store's namespace of a shared
+	// database, or opens it wide (ADR 0052). Nil reads the whole database.
+	Brain *brain.Scope `json:"-"`
 }
 
 // String returns a human-readable description of the source
@@ -100,6 +104,9 @@ type DiscoveryOptions struct {
 	IncludeInvalid bool
 	// SkipWorktreeSources restricts discovery to sources in BeadsDir.
 	SkipWorktreeSources bool
+	// Env answers for the environment variables that locate a Dolt server.
+	// Nil reads the process environment.
+	Env func(string) string
 	// Verbose enables detailed logging during discovery
 	Verbose bool
 	// Logger receives log messages when Verbose is true
@@ -239,7 +246,11 @@ func discoverDoltSources(beadsDir string, opts DiscoveryOptions) ([]DataSource, 
 		return nil, nil
 	}
 
-	addr := resolveDoltAddress(beadsDir, meta)
+	getenv := opts.Env
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	addr := resolveDoltAddressWith(beadsDir, meta, getenv)
 	user := meta.DoltServerUser
 	if user == "" {
 		user = "root"

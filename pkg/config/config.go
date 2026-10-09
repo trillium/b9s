@@ -25,6 +25,9 @@ type Project struct {
 	// Database and Host identify a Dolt server project that has no checkout.
 	Database string `yaml:"database,omitempty"`
 	Host     string `yaml:"host,omitempty"`
+	// Store names a brain store, a project that shares its Dolt database with
+	// other stores and is told apart by name (ADR 0052).
+	Store string `yaml:"store,omitempty"`
 }
 
 // UIConfig holds UI preference settings.

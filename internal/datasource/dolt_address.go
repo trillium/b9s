@@ -33,9 +33,17 @@ const (
 // for a remote host, where the legacy BEADS_DOLT_PORT also applies. In shared
 // server mode the port comes from the shared server directory, not the project.
 func resolveDoltAddress(beadsDir string, meta beadsMetadata) string {
+	return resolveDoltAddressWith(beadsDir, meta, os.Getenv)
+}
+
+// resolveDoltAddressWith resolves the address with the environment getenv
+// answers for. A brain store's wrapper exports the server's host and port, so
+// its sources are resolved against those pins rather than b9s's own
+// environment (ADR 0052).
+func resolveDoltAddressWith(beadsDir string, meta beadsMetadata, getenv func(string) string) string {
 	yamlFiles := bdConfigFiles(beadsDir)
 
-	host := os.Getenv("BEADS_DOLT_SERVER_HOST")
+	host := getenv("BEADS_DOLT_SERVER_HOST")
 	if host == "" {
 		host = meta.DoltServerHost
 	}
@@ -49,11 +57,11 @@ func resolveDoltAddress(beadsDir string, meta beadsMetadata) string {
 	remote := !isLocalDoltHost(host)
 
 	portDir := beadsDir
-	doltDir := doltDataDir(beadsDir)
+	doltDir := doltDataDir(beadsDir, getenv)
 	metaPort := meta.DoltServerPort
-	shared := sharedServerMode(yamlFiles)
+	shared := sharedServerMode(yamlFiles, getenv)
 	if shared {
-		if dir, ok := sharedServerDir(); ok {
+		if dir, ok := sharedServerDir(getenv); ok {
 			portDir = dir
 			doltDir = filepath.Join(dir, "dolt")
 			// bd reads the metadata port from the shared directory as well,
@@ -62,7 +70,7 @@ func resolveDoltAddress(beadsDir string, meta beadsMetadata) string {
 		}
 	}
 
-	port, fromEnv := envPort("BEADS_DOLT_SERVER_PORT"), false
+	port, fromEnv := envPort(getenv, "BEADS_DOLT_SERVER_PORT"), false
 	if port > 0 {
 		fromEnv = true
 	}
@@ -79,7 +87,7 @@ func resolveDoltAddress(beadsDir string, meta beadsMetadata) string {
 		port = metaPort
 	}
 	if remote && !fromEnv {
-		if legacy := envPort("BEADS_DOLT_PORT"); legacy > 0 {
+		if legacy := envPort(getenv, "BEADS_DOLT_PORT"); legacy > 0 {
 			port = legacy
 		}
 	}
@@ -104,8 +112,8 @@ func isLocalDoltHost(host string) bool {
 	return false
 }
 
-func envPort(name string) int {
-	port, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+func envPort(getenv func(string) string, name string) int {
+	port, err := strconv.Atoi(strings.TrimSpace(getenv(name)))
 	if err != nil || port <= 0 {
 		return 0
 	}
@@ -124,23 +132,23 @@ func readPortFile(path string) int {
 	return port
 }
 
-func doltDataDir(beadsDir string) string {
-	if dir := os.Getenv("BEADS_DOLT_DATA_DIR"); dir != "" {
+func doltDataDir(beadsDir string, getenv func(string) string) string {
+	if dir := getenv("BEADS_DOLT_DATA_DIR"); dir != "" {
 		return dir
 	}
 	return filepath.Join(beadsDir, "dolt")
 }
 
-func sharedServerMode(yamlFiles []string) bool {
-	if v := os.Getenv("BEADS_DOLT_SHARED_SERVER"); v == "1" || strings.EqualFold(v, "true") {
+func sharedServerMode(yamlFiles []string, getenv func(string) string) bool {
+	if v := getenv("BEADS_DOLT_SHARED_SERVER"); v == "1" || strings.EqualFold(v, "true") {
 		return true
 	}
 	v := yamlValue(yamlFiles, "dolt", "shared-server")
 	return v == "1" || strings.EqualFold(v, "true")
 }
 
-func sharedServerDir() (string, bool) {
-	if dir := os.Getenv("BEADS_SHARED_SERVER_DIR"); dir != "" {
+func sharedServerDir(getenv func(string) string) (string, bool) {
+	if dir := getenv("BEADS_SHARED_SERVER_DIR"); dir != "" {
 		return dir, true
 	}
 	home, err := os.UserHomeDir()
