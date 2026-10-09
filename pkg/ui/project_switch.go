@@ -71,6 +71,13 @@ func (m Model) beginProjectSwitch(project config.Project) (Model, tea.Cmd) {
 	m.statusIsError = false
 
 	open := m.openProject
+	if project.Store != "" && target.Store == nil {
+		// The registry no longer lists the store. Opening its folder as a plain
+		// checkout would read every store on the database.
+		open = func(datasource.OpenTarget) (datasource.OpenedProject, *datasource.OpenFailure) {
+			return datasource.OpenedProject{}, &datasource.OpenFailure{Reason: datasource.OpenNoStore, Project: project.Name, Err: errNoStore}
+		}
+	}
 	return m, tea.Batch(
 		func() tea.Msg {
 			opened, failure := open(target)
@@ -89,6 +96,9 @@ func (m Model) beginProjectSwitch(project config.Project) (Model, tea.Cmd) {
 // otherwise from its database as the startup project's Dolt user, the only
 // credential b9s holds for it.
 func (m Model) openTargetFor(project config.Project) datasource.OpenTarget {
+	if project.Store != "" {
+		return m.brainOpenTarget(project)
+	}
 	return openTargetFor(project, m.startupDoltUser)
 }
 
@@ -243,7 +253,8 @@ func (m Model) applyProjectSwitch(project config.Project) (Model, tea.Cmd) {
 	m.projectGeneration++
 	m.memoryBrowser, m.memoryVisible, m.memoryRefused = nil, false, false
 	m.memoryGeneration++
-	checkout, hasCheckout := NewCheckout(project.ResolvedPath())
+	m.brain.activeStore, m.brain.refusal = project.Store, ""
+	checkout, hasCheckout := m.checkoutFor(project)
 	m.issueWriter.SetCheckout(checkout)
 	m.board.SetActiveProjectName(project.Name)
 	m.updateListDelegate()
@@ -277,6 +288,11 @@ func (m Model) applyProjectSwitch(project config.Project) (Model, tea.Cmd) {
 		m.statusIsError = true
 		return m, nil
 	}
+	if project.Store != "" {
+		// A store shares its database with other stores, so an export file
+		// beside it is never a source for it.
+		newPath = ""
+	}
 	// Stop background worker and old watchers (bd-87w)
 	if m.backgroundWorker != nil {
 		m.backgroundWorker.Stop()
@@ -301,6 +317,9 @@ func (m Model) applyProjectSwitch(project config.Project) (Model, tea.Cmd) {
 	// project's view; the first load of the new project sets its own value.
 	m.commentsLoadErr = nil
 	m.sourceInfo = fmt.Sprintf("jsonl %s", filepath.Base(newPath))
+	if project.Store != "" {
+		m.sourceInfo = "brain store " + project.Store + " (not connected)"
+	}
 	if discErr == nil {
 		for _, s := range sources {
 			if s.Type == datasource.SourceTypeDolt {

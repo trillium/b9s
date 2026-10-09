@@ -15,9 +15,17 @@ func ResolveActor(projectDir string) string {
 	return defaultActorLookup.actor(projectDir)
 }
 
-// HeaderProjects is the project list the TUI header numbers 1-9.
+// HeaderProjects is the project list the TUI header numbers 1-9. A brain store
+// is left out: b9s web serves checkouts and databases, and a store read that
+// way would show the beads of every store on its database (ADR 0052).
 func HeaderProjects(recent []config.RecentProject, active config.RecentProject) []config.Project {
-	return headerProjects(recent, active)
+	var projects []config.Project
+	for _, p := range headerProjects(recent, active) {
+		if p.Store == "" {
+			projects = append(projects, p)
+		}
+	}
+	return projects
 }
 
 // IsClosedLike reports whether status counts as closed in filters and counts.
@@ -39,7 +47,7 @@ type ProjectCounts struct {
 // ProbeProjects loads every project in parallel, as the header does, and
 // returns counts and reachability keyed by ProjectKey.
 func ProbeProjects(projects []config.Project, startupUser string) (map[string]ProjectCounts, map[string]datasource.Reachability) {
-	counts, reach := probeProjects(projects, startupUser)
+	counts, reach := probeProjects(projects, startupUser, nil)
 	out := make(map[string]ProjectCounts, len(counts))
 	for key, c := range counts {
 		out[key] = ProjectCounts{Open: c.open, InProgress: c.inProgress, Ready: c.ready, Blocked: c.blocked}

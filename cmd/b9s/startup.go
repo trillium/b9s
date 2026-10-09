@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/internal/datasource"
 	"github.com/vanderheijden86/b9s/pkg/config"
 )
@@ -14,8 +15,10 @@ type projectOpener func(datasource.OpenTarget) (datasource.OpenedProject, *datas
 
 // startupChoice is the project b9s opens at startup.
 type startupChoice struct {
-	Name   string
-	Dir    string
+	Name string
+	Dir  string
+	// Store is the brain store the project opened as, or nil for a checkout.
+	Store  *brain.Store
 	Opened datasource.OpenedProject
 	// StartupFailure is why the folder b9s was started in did not open, when
 	// b9s fell back to the last project that opened successfully.
@@ -29,25 +32,88 @@ type startupChoice struct {
 // starts b9s in the wrong folder must fail, not quietly act on other data.
 // Only a recent project with a local checkout can be the fallback, because a
 // database without one needs the startup project's Dolt user to connect.
-func chooseStartupProject(name, dir string, cfg *config.Config, interactive bool, open projectOpener) (startupChoice, error) {
-	opened, failure := open(datasource.OpenTarget{Name: name, Dir: dir})
+//
+// In brain mode the startup folder may be a brain store (store is not nil), and
+// a recent project that is a store opens as that store, through registry. A
+// store is never opened as a plain checkout: its folder shares a database with
+// other stores.
+func chooseStartupProject(name, dir string, store *brain.Store, registry *brain.Registry, cfg *config.Config, interactive bool, open projectOpener) (startupChoice, error) {
+	opened, failure := open(openTarget(name, dir, store))
 	if failure == nil {
-		return startupChoice{Name: name, Dir: dir, Opened: opened}, nil
+		return startupChoice{Name: name, Dir: dir, Store: store, Opened: opened}, nil
 	}
 	if !interactive {
 		return startupChoice{}, startupError(formatOpenFailure(failure))
 	}
 
-	last, ok := cfg.LastOpened(config.RecentProject{Name: name, Path: dir})
+	if registry == nil {
+		cfg = withoutStores(cfg)
+	}
+	except := config.RecentProject{Name: name, Path: dir}
+	if store != nil {
+		except = config.RecentFromStore(store.Name, dir)
+	}
+	last, ok := cfg.LastOpened(except)
 	if !ok || last.Path == "" {
 		return startupChoice{}, startupError(formatOpenFailure(failure) +
 			"No recent project with a local checkout has opened successfully, so there is nothing to fall back to.\n")
 	}
-	fallback, fallbackFailure := open(datasource.OpenTarget{Name: last.Name, Dir: last.Path})
+	var lastStore *brain.Store
+	if last.Store != "" {
+		s, found := registry.Store(last.Store)
+		if !found {
+			return startupChoice{}, startupError(formatOpenFailure(failure) +
+				fmt.Sprintf("The last project that opened, %s, is no longer a store in the brain registry.\n", last.Name))
+		}
+		lastStore = &s
+	}
+	fallback, fallbackFailure := open(openTarget(last.Name, last.Path, lastStore))
 	if fallbackFailure != nil {
 		return startupChoice{}, startupError(formatOpenFailure(failure) + formatOpenFailure(fallbackFailure))
 	}
-	return startupChoice{Name: last.Name, Dir: last.Path, Opened: fallback, StartupFailure: failure}, nil
+	return startupChoice{Name: last.Name, Dir: last.Path, Store: lastStore, Opened: fallback, StartupFailure: failure}, nil
+}
+
+// openTarget names what to open: a brain store through its namespace, or a
+// folder.
+func openTarget(name, dir string, store *brain.Store) datasource.OpenTarget {
+	if store != nil {
+		return datasource.OpenTarget{Name: name, Dir: store.Dir(), Store: store}
+	}
+	return datasource.OpenTarget{Name: name, Dir: dir}
+}
+
+// withoutStores is cfg without its recent brain stores, for a run that has no
+// brain registry to open them through.
+func withoutStores(cfg *config.Config) *config.Config {
+	trimmed := *cfg
+	trimmed.RecentProjects = nil
+	for _, p := range cfg.RecentProjects {
+		if p.Store == "" {
+			trimmed.RecentProjects = append(trimmed.RecentProjects, p)
+		}
+	}
+	return &trimmed
+}
+
+// startupSources discovers the sources of the project that opened: for a brain
+// store its scoped server, otherwise every source in the folder.
+func startupSources(choice startupChoice, beadsDir string) ([]datasource.DataSource, error) {
+	if choice.Store != nil {
+		return datasource.StoreSources(*choice.Store)
+	}
+	return datasource.DiscoverSources(datasource.DiscoveryOptions{
+		BeadsDir:               beadsDir,
+		ValidateAfterDiscovery: false,
+	})
+}
+
+// startupRecent describes the project that opened, for the recent list.
+func startupRecent(choice startupChoice, name, path string) (config.RecentProject, bool) {
+	if choice.Store != nil {
+		return config.RecentFromStore(choice.Store.Name, path), true
+	}
+	return config.RecentFromCheckout(name, path)
 }
 
 func startupError(text string) error {

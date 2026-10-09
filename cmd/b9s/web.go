@@ -116,7 +116,7 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 	startupDir := filepath.Dir(startupBeadsDir)
 	// Never fall back to another project: a server started in the wrong
 	// folder must fail rather than serve other data to a phone.
-	choice, err := chooseStartupProject(filepath.Base(startupDir), startupDir, &appCfg, false, datasource.OpenProject)
+	choice, err := chooseStartupProject(filepath.Base(startupDir), startupDir, nil, nil, &appCfg, false, datasource.OpenProject)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1

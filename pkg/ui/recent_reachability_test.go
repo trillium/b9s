@@ -27,7 +27,7 @@ func TestProjectKeyDistinguishesProjectsWithoutCheckout(t *testing.T) {
 func TestProjectCountsRecordServerDownForUnreachableDatabase(t *testing.T) {
 	remote := config.Project{Name: "remote", Database: "remote_db", Host: "127.0.0.1:1"}
 
-	msg := loadProjectCountsCmd([]config.Project{remote}, "reader")()
+	msg := loadProjectCountsCmd([]config.Project{remote}, "reader", nil)()
 
 	loaded, ok := msg.(projectCountsLoadedMsg)
 	if !ok {
@@ -111,7 +111,7 @@ func writeCheckoutWithStaleExport(t *testing.T) string {
 func TestProjectCountsReportCheckoutServerFailureInsteadOfExport(t *testing.T) {
 	checkout := config.Project{Name: "checkout", Path: writeCheckoutWithStaleExport(t)}
 
-	msg := loadProjectCountsCmd([]config.Project{checkout}, "reader")()
+	msg := loadProjectCountsCmd([]config.Project{checkout}, "reader", nil)()
 
 	loaded, ok := msg.(projectCountsLoadedMsg)
 	if !ok {

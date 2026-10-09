@@ -105,6 +105,22 @@ func (t ProjectTableModel) selected() (string, bool) {
 	return t.databases[t.cursor], true
 }
 
+// window is the range of rows shown in a terminal height lines tall: as many
+// as fit around the box's title and footer, kept around the cursor.
+func (t ProjectTableModel) window(height int) (first, last int) {
+	rows := height - 14
+	if rows < 3 {
+		rows = 3
+	}
+	if len(t.databases) <= rows {
+		return 0, len(t.databases)
+	}
+	if t.cursor >= rows {
+		first = t.cursor - rows + 1
+	}
+	return first, first + rows
+}
+
 // View renders the table as a centred box.
 func (t ProjectTableModel) View() string {
 	width, height := t.width, t.height
@@ -145,7 +161,10 @@ func (t ProjectTableModel) View() string {
 			lines = append(lines, dimStyle.Render("No readable Beads databases."))
 		}
 		lines = append(lines, dimStyle.Render(fmt.Sprintf("  %-40s %s", "NAME", "RECENT")))
-		for i, database := range t.databases {
+		// A registry can list dozens of stores: show the rows around the cursor.
+		first, last := t.window(height)
+		for i := first; i < last; i++ {
+			database := t.databases[i]
 			recent := ""
 			if slot := t.slots[database]; slot > 0 {
 				recent = fmt.Sprintf("<%d>", slot)
@@ -157,6 +176,9 @@ func (t ProjectTableModel) View() string {
 				style = cursorStyle
 			}
 			lines = append(lines, style.Render(fmt.Sprintf("%s%-40s %s", prefix, database, recent)))
+		}
+		if first > 0 || last < len(t.databases) {
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  %d-%d of %d", first+1, last, len(t.databases))))
 		}
 	}
 
@@ -187,6 +209,9 @@ func loadProjectTableCmd(host, user string) tea.Cmd {
 }
 
 func (m Model) openProjectTable() (Model, tea.Cmd) {
+	if m.brain.registry != nil {
+		return m.openBrainProjectTable(), nil
+	}
 	m.projectTable = NewProjectTable(m.theme)
 	m.projectTable.SetSize(m.width, m.height-1)
 	m.projectTable.startLoading(m.startupDoltHost)
@@ -209,7 +234,9 @@ func (m Model) projectTableSlots() map[string]int {
 		if i >= config.MaxRecentProjects {
 			break
 		}
-		if p.Database != "" && p.Host == m.startupDoltHost {
+		if p.Store != "" {
+			slots[p.Store] = i + 1
+		} else if p.Database != "" && p.Host == m.startupDoltHost {
 			slots[p.Database] = i + 1
 		}
 	}
@@ -242,6 +269,9 @@ func (m Model) handleProjectTableKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.showProjectTable = false
 		project := m.projectForDatabase(database)
+		if m.brain.registry != nil {
+			project = m.projectForStore(database)
+		}
 		return m, func() tea.Msg { return SwitchProjectMsg{Project: project} }
 	}
 	return m, nil
@@ -251,7 +281,7 @@ func (m Model) handleProjectTableKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 // if new, its opened_at is updated, the list is saved, and the header rows are
 // rebuilt so a new project has a number key.
 func (m *Model) rememberRecentProject(project config.Project) {
-	recent := config.RecentProject{Name: project.Name, Database: project.Database, Host: project.Host, Path: project.Path}
+	recent := config.RecentProject{Name: project.Name, Database: project.Database, Host: project.Host, Path: project.Path, Store: project.Store}
 	m.appConfig.TouchRecent(recent)
 	if !m.appConfig.MarkOpened(recent, time.Now()) {
 		return

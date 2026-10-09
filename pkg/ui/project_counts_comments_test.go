@@ -58,7 +58,7 @@ func TestProjectCountsKeepsCountsOnCommentsOnlyError(t *testing.T) {
 	dir := writeCheckoutWithCommentsFailure(t, root, "degraded")
 	project := config.Project{Name: "degraded", Path: dir}
 
-	msg := loadProjectCountsCmd([]config.Project{project}, "")()
+	msg := loadProjectCountsCmd([]config.Project{project}, "", nil)()
 
 	loaded, ok := msg.(projectCountsLoadedMsg)
 	if !ok {

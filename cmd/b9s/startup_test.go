@@ -36,7 +36,7 @@ func configWithOpened(projects ...config.RecentProject) *config.Config {
 func TestChooseStartupProject_OpensWorkingStartupFolder(t *testing.T) {
 	opener := &fakeOpener{working: map[string]int{"/work/b9s": 3}}
 
-	choice, err := chooseStartupProject("b9s", "/work/b9s", configWithOpened(), true, opener.open)
+	choice, err := chooseStartupProject("b9s", "/work/b9s", nil, nil, configWithOpened(), true, opener.open)
 
 	if err != nil {
 		t.Fatalf("err = %v, want the startup folder to open", err)
@@ -50,7 +50,7 @@ func TestChooseStartupProject_WithoutTerminalFailsInsteadOfFallingBack(t *testin
 	opener := &fakeOpener{working: map[string]int{"/work/b9s": 3}}
 	cfg := configWithOpened(config.RecentProject{Name: "b9s", Path: "/work/b9s", OpenedAt: time.Now()})
 
-	_, err := chooseStartupProject("ghost", "/work/ghost", cfg, false, opener.open)
+	_, err := chooseStartupProject("ghost", "/work/ghost", nil, nil, cfg, false, opener.open)
 
 	if err == nil {
 		t.Fatal("err = nil, want the startup failure without a terminal")
@@ -64,7 +64,7 @@ func TestChooseStartupProject_FallsBackToLastOpenedProject(t *testing.T) {
 	opener := &fakeOpener{working: map[string]int{"/work/b9s": 3}}
 	cfg := configWithOpened(config.RecentProject{Name: "b9s", Path: "/work/b9s", OpenedAt: time.Now()})
 
-	choice, err := chooseStartupProject("ghost", "/work/ghost", cfg, true, opener.open)
+	choice, err := chooseStartupProject("ghost", "/work/ghost", nil, nil, cfg, true, opener.open)
 
 	if err != nil {
 		t.Fatalf("err = %v, want a fallback to b9s", err)
@@ -81,7 +81,7 @@ func TestChooseStartupProject_WithoutOpenedProjectFails(t *testing.T) {
 	opener := &fakeOpener{working: map[string]int{"/work/b9s": 3}}
 	cfg := configWithOpened(config.RecentProject{Name: "b9s", Path: "/work/b9s"})
 
-	if _, err := chooseStartupProject("ghost", "/work/ghost", cfg, true, opener.open); err == nil {
+	if _, err := chooseStartupProject("ghost", "/work/ghost", nil, nil, cfg, true, opener.open); err == nil {
 		t.Fatal("err = nil, want failure: no recent project has ever opened")
 	}
 }
@@ -90,7 +90,7 @@ func TestChooseStartupProject_FailingFallbackReportsBothProjects(t *testing.T) {
 	opener := &fakeOpener{}
 	cfg := configWithOpened(config.RecentProject{Name: "b9s", Path: "/work/b9s", OpenedAt: time.Now()})
 
-	_, err := chooseStartupProject("ghost", "/work/ghost", cfg, true, opener.open)
+	_, err := chooseStartupProject("ghost", "/work/ghost", nil, nil, cfg, true, opener.open)
 
 	if err == nil {
 		t.Fatal("err = nil, want failure when the fallback also fails")
