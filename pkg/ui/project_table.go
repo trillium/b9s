@@ -41,10 +41,14 @@ type ProjectTableModel struct {
 	databases []string
 	slots     map[string]int // database -> header number key, for recent projects
 	reason    string
-	cursor    int
-	width     int
-	height    int
-	theme     Theme
+	// windowed shows only the rows around the cursor. A brain registry can
+	// list dozens of stores; the database list of a Dolt server has always
+	// been drawn whole.
+	windowed bool
+	cursor   int
+	width    int
+	height   int
+	theme    Theme
 }
 
 // NewProjectTable returns a table that has not started loading.
@@ -112,7 +116,7 @@ func (t ProjectTableModel) window(height int) (first, last int) {
 	if rows < 3 {
 		rows = 3
 	}
-	if len(t.databases) <= rows {
+	if !t.windowed || len(t.databases) <= rows {
 		return 0, len(t.databases)
 	}
 	if t.cursor >= rows {
@@ -161,7 +165,6 @@ func (t ProjectTableModel) View() string {
 			lines = append(lines, dimStyle.Render("No readable Beads databases."))
 		}
 		lines = append(lines, dimStyle.Render(fmt.Sprintf("  %-40s %s", "NAME", "RECENT")))
-		// A registry can list dozens of stores: show the rows around the cursor.
 		first, last := t.window(height)
 		for i := first; i < last; i++ {
 			database := t.databases[i]

@@ -103,6 +103,7 @@ func (m Model) openBrainProjectTable() Model {
 	m.projectTable = NewProjectTable(m.theme)
 	m.projectTable.SetSize(m.width, m.height-1)
 	m.projectTable.startLoading("brain stores")
+	m.projectTable.windowed = true
 	m.projectTable.finishLoading(m.brain.registry.Names(), nil, m.projectTableSlots())
 	m.showProjectTable = true
 	return m

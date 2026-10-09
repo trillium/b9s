@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,5 +220,41 @@ func TestWebHeaderLeavesBrainStoresOut(t *testing.T) {
 	got := HeaderProjects(recent, config.RecentProject{})
 	if len(got) != 1 || got[0].Name != "plain" {
 		t.Errorf("web header = %+v; b9s web cannot read a store through its namespace", got)
+	}
+}
+
+func TestBrainProjectTableShowsTheRowsAroundTheCursor(t *testing.T) {
+	m, _ := brainModel(t)
+	var names []string
+	for i := 0; i < 60; i++ {
+		names = append(names, fmt.Sprintf("store%02d", i))
+	}
+	m.projectTable = NewProjectTable(m.theme)
+	m.projectTable.SetSize(100, 30)
+	m.projectTable.windowed = true
+	m.projectTable.finishLoading(names, nil, nil)
+	m.projectTable.cursor = 45
+
+	view := m.projectTable.View()
+
+	if !strings.Contains(view, "store45") || strings.Contains(view, "store00") {
+		t.Errorf("the window must follow the cursor:\n%s", view)
+	}
+	if !strings.Contains(view, "of 60") {
+		t.Errorf("a windowed table says how much it hides:\n%s", view)
+	}
+}
+
+func TestProjectTableOfADoltServerIsStillDrawnWhole(t *testing.T) {
+	m, _ := brainModel(t)
+	var names []string
+	for i := 0; i < 60; i++ {
+		names = append(names, fmt.Sprintf("db%02d", i))
+	}
+	table := NewProjectTable(m.theme)
+	table.SetSize(100, 30)
+	table.finishLoading(names, nil, nil)
+	if first, last := table.window(30); first != 0 || last != 60 {
+		t.Errorf("window = %d-%d; the catalog of a server has always been drawn whole", first, last)
 	}
 }
