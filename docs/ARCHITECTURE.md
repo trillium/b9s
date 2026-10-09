@@ -15,6 +15,7 @@ b9s is a Go program built on [Bubble Tea](https://github.com/charmbracelet/bubbl
 - [Query state](#query-state)
 - [Writes go through bd](#writes-go-through-bd)
 - [Projects and the catalog](#projects-and-the-catalog)
+- [Brain stores](#brain-stores)
 - [People and identities](#people-and-identities)
 - [The web UI](#the-web-ui)
 - [Configuration](#configuration)
@@ -52,6 +53,7 @@ Every `bd` run goes through `internal/bdrun`, with a literal argv and no shell. 
 | `pkg/ui` | The whole terminal UI: the root `Model`, the tree, detail pane, board, graph, command prompt, pickers, forms, tutorial and the `IssueWriter` that runs `bd` |
 | `pkg/model` | Domain types: `Issue`, `Dependency`, `Status`, `Priority` and their parsing |
 | `internal/datasource` | Source discovery and readers for Dolt, SQLite and JSONL, plus the Dolt watcher, the project catalog and the open-failure reasons |
+| `internal/brain` | Brain mode: the store registry, the command that runs `bd` for a store, and the namespace rule that scopes a read to one store (ADR 0052) |
 | `internal/bdrun` | Finding and running `bd`: the deadline, the process-group kill, and the timeout and cancel errors |
 | `internal/attach` | Attaching and detaching files: upload to the blob store, then a reference comment through `bd` (ADR 0024). `GC` deletes blobs that no comment references once they are older than the grace period, and checks each one again just before it deletes it |
 | `internal/attachref` | The versioned attachment reference line in a comment, and the fold of comments into an issue's attachment list |
@@ -204,6 +206,22 @@ The header lists recent projects from `config.yaml`, not folders discovered by s
 `:project` opens the project table, which lists the databases on the startup project's Dolt server that the startup user can read. `catalog.go` classifies each database into a closed `Reachability` set from the MySQL error number, so a down tunnel is never reported as refused access or the reverse. Opening a database without a checkout reads it as the startup user, the only credential b9s holds. See [ADR 0007](adr/0007-read-shared-beads-through-one-select-only-catalog-account.md) and [ADR 0009](adr/0009-open-entity-views-from-a-colon-command-prompt.md), superseded in part by [ADR 0027](adr/0027-show-a-flat-list-for-type-queries-and-on-t.md).
 
 A project switch is a small state machine in `project_switch.go`. While a project is `Opening`, the current one stays on screen and usable, and it is replaced only once the new one has loaded. A deadline of ten seconds bounds the wait, with the Dolt connect timeout of five seconds inside it. A failure keeps the old project and shows the `OpenReason`, a closed set that the CLI and the TUI share.
+
+## Brain stores
+
+Brain is a fork of Beads whose named stores share one Dolt database, `brain_unified`, and whose wrappers (`~/.local/bin/<store>`) pin the store for `bd`. `internal/brain` reads brain's registry (`~/.config/brain/stores.yaml`, or `BRAIN_STORES_FILE`) and makes each store a project: `config.Project` and `RecentProject` carry a `Store` name, which alone identifies a store, since stores share a database and may share a folder. Brain mode is automatic when the registry lists a store and off with `--no-brain` or `B9S_BRAIN=off`; without a registry no code path of it runs.
+
+```text
+ registry ──▶ projects (:project table, header recents, --store)
+                 │ read                              │ write
+                 ▼                                   ▼
+   DataSource.Brain = Scope{Store}        Checkout.store ──▶ IssueWriter.invocation
+   DoltReader: brain.Resolve per load        ~/.local/bin/<store>   (or bd with BD_NAME, BEADS_DIR
+   → id LIKE 'prefix-%' (narrow)             on a bd that lists --wide)
+   0 view: Scope{Wide} → owners in SourceRepo
+```
+
+`datasource.StoreSources` finds a store's server with the host and port its wrapper exports and returns only a Dolt source, scoped to the store; `OpenTarget.Store` makes `OpenProject` use it, and a store never falls back to a file. `brain.Resolve` runs on every load against the open connection: a database without `brain_unified_config` is read whole, a narrow read takes the prefixes of `brain_store_prefixes` for the store (after `brain_store_aliases`), and a wide read has no clause and names each bead's owner. `Checkout` can carry a store, and `IssueWriter` then runs the store's wrapper, or `bd` with the store's `BD_NAME` and `BEADS_DIR` when `bdrun.ProbeBrain` finds brain's `--wide` flag in `bd --help`. A failed write opens a popup with the text unchanged. `b9s web` leaves stores out of its header. See [ADR 0052](adr/0052-read-and-write-brain-stores-through-their-namespace.md).
 
 ## People and identities
 

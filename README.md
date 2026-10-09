@@ -26,6 +26,7 @@ b9s is a keyboard-driven terminal UI modelled on [k9s](https://k9scli.io/): if y
 - [Creators and assignees](#creators-and-assignees)
 - [Search](#search)
 - [Projects](#projects)
+- [Brain stores](#brain-stores)
 - [Data sources](#data-sources)
 - [Configuration](#configuration)
 - [Phone and browser](#phone-and-browser)
@@ -206,8 +207,31 @@ b9s loads a project before it replaces the one on screen. While it loads, the st
 | Unreadable | no issues file or Dolt configuration could be read |
 | Timed out | the project did not open within 10 seconds |
 | bd not found | the project uses embedded Dolt, and `bd` is not on `PATH` |
+| Not a brain store | a recent project names a [brain store](#brain-stores) that the registry no longer lists |
 
 Press `r` in the popup to retry. When the folder b9s starts in cannot be opened, b9s opens the recent project that last opened successfully and shows the same popup. With `--no-fallback`, or without a terminal, it exits with status 1 instead, so a script never acts on the wrong project.
+
+## Brain stores
+
+Brain is a fork of Beads that keeps many named stores on one machine. Each store is a wrapper command, such as `~/.local/bin/task`, and all of them share one Dolt database, `brain_unified`, where a store sees only its own namespace. b9s has a brain mode for that setup. It switches on by itself when `~/.config/brain/stores.yaml` lists stores, and a machine without that file gets the b9s described everywhere else in this README.
+
+In brain mode:
+
+- **Stores are projects.** `:project` lists the registry's stores by name, and a store you open takes a number key in the header like any other project. b9s started in a store's folder opens that store, and `--store <name>` opens one from anywhere.
+- **A store shows only its own beads.** b9s reads the same set `bd list` returns inside that store: the beads whose id starts with a prefix that `brain_store_prefixes` records for it. Stores that share a folder or a database stay separate projects.
+- **`0` is brain's wide read.** It shows every store's beads in one read-only view, each named for the store that owns it, so `project:task` finds one store's beads.
+- **Writes go through the store.** Create, edit, status, close and delete run the store's own wrapper (`~/.local/bin/<name>`), so brain's guard hooks, prefix ownership, markdown render and event outbox all apply. A change that brain refuses is shown unchanged in a popup and the footer, and nothing is created. With no wrapper b9s runs `bd` with the store's `BD_NAME` and `BEADS_DIR`, and only when that `bd` is brain's. Otherwise it refuses the write and says how to fix it.
+- **Live refresh works.** b9s polls the shared database's hash like any Dolt project and reloads the open store's namespace when any store writes.
+- **Only the server is a source.** A store has no JSONL, SQLite or embedded fallback, because a copy beside it could hold other stores' beads.
+
+| Option | Effect |
+|--------|--------|
+| `--store <name>` | Open this store at startup, whatever the folder (implies `--brain`) |
+| `--brain`, `B9S_BRAIN=on` | Fail unless a registry exists, instead of falling back to plain b9s |
+| `--no-brain`, `B9S_BRAIN=off` | Ignore the registry |
+| `BRAIN_STORES_FILE` | Read this registry file instead of `~/.config/brain/stores.yaml` |
+
+`b9s web` does not serve stores yet. See [ADR 0052](docs/adr/0052-read-and-write-brain-stores-through-their-namespace.md).
 
 ## Data sources
 
@@ -460,6 +484,7 @@ Type `:mouse` to hand the mouse to the terminal, so a drag selects text. Type `:
 | `--filter '<query>'` | Start with a [query](#search) applied |
 | `--repo <prefix>` | Show only issues whose ID starts with the prefix, for example `api` |
 | `--no-fallback` | Exit with status 1 when the current folder cannot be opened |
+| `--store <name>`, `--brain`, `--no-brain` | Open a [brain store](#brain-stores), require brain mode, or ignore the brain registry |
 | `--debug` | Write a debug log to `.b9s/debug.log` |
 | `--check-update` | Report whether a newer release exists |
 | `--update` | Install the latest release after verifying its checksum and its build provenance ([ADR 0028](docs/adr/0028-verify-release-provenance-in-the-updater.md)); `--yes` skips the prompt |

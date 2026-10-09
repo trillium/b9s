@@ -70,6 +70,7 @@ The second command runs the E2E test for identity aliases in `tests/e2e/identity
 | `B9S_TEST_DOLT_CATALOG_DB`, `B9S_TEST_DOLT_OTHER_DB` | Two databases the user can read |
 | `B9S_TEST_DOLT_SCRATCH_ADDR`, `B9S_TEST_DOLT_SCRATCH_USER` | The disposable server for tests that create databases |
 | `BEADS_DOLT_PASSWORD` | The password for both |
+| `B9S_TEST_BRAIN_HOME` | A scratch `HOME` with a brain registry and store wrappers pointing at a scratch copy of `brain_unified`; enables `TestDoltIntegration_BrainReadMatchesBdsNarrowList`, which compares b9s's scoped read with `bd list` per store |
 
 ## End-to-end tests
 
