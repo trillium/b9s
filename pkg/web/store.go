@@ -74,7 +74,7 @@ func (s *Store) Open(target datasource.OpenTarget, key string) *datasource.OpenF
 	if opened.DoltFailure != nil {
 		fallback = opened.DoltFailure.Message()
 	}
-	_, hasCheckout := ui.NewCheckout(target.Dir)
+	hasCheckout := ui.CheckoutFor(target).Dir() != ""
 
 	s.mu.Lock()
 	s.stopWatchingLocked()
@@ -203,15 +203,15 @@ func (s *Store) Info() ProjectInfo {
 	return s.info
 }
 
-// CheckoutDir is where bd runs for the project on screen, or "" when it is
-// read-only.
-func (s *Store) CheckoutDir() string {
+// Checkout is where bd runs for the project on screen: the folder, or the
+// brain store's own command. The zero Checkout means it is read-only.
+func (s *Store) Checkout() ui.Checkout {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.info.ReadOnly {
-		return ""
+		return ui.Checkout{}
 	}
-	return s.target.Dir
+	return ui.CheckoutFor(s.target)
 }
 
 // Target is what the project on screen was opened from.

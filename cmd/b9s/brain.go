@@ -22,19 +22,6 @@ type brainStartup struct {
 	Store    *brain.Store    // the store to open, nil for the startup folder
 }
 
-// refuseBrainStoreForWeb reports, on stderr, that b9s web was started in a
-// brain store's folder and returns true. b9s web reads a folder's database
-// whole, so it would serve every store on the shared database as this one
-// (ADR 0052).
-func refuseBrainStoreForWeb(startupDir string, stderr io.Writer) bool {
-	start, err := resolveBrain(brainFlags{}, startupDir, os.Getenv("BD_NAME"), io.Discard)
-	if err != nil || start.Store == nil {
-		return false
-	}
-	fmt.Fprintf(stderr, "b9s web: %s is the brain store %s, and b9s web does not serve brain stores yet: it would show every store on the shared database\n", startupDir, start.Store.Name)
-	return true
-}
-
 // resolveBrain decides whether b9s runs in brain mode and which store it opens.
 //
 // Brain mode is automatic when a registry exists, so a machine with brain

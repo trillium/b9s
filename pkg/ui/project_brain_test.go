@@ -212,14 +212,24 @@ func TestReloadOfAStoreNeverFallsBackToAFile(t *testing.T) {
 	}
 }
 
-func TestWebHeaderLeavesBrainStoresOut(t *testing.T) {
-	recent := []config.RecentProject{
-		config.RecentFromStore("task", "/srv/task"),
-		{Name: "plain", Path: "/srv/plain"},
+func TestWebBridgeOpensAStoreThroughTheRegistry(t *testing.T) {
+	reg := brainRegistry(t)
+	task, _ := reg.Store("task")
+	project := storeProject(task)
+
+	target := ProjectOpenTarget(project, "reader", reg)
+	if target.Store == nil || target.Store.Name != "task" || target.Dir != task.Dir() {
+		t.Errorf("target = %+v, want the task store", target)
 	}
-	got := HeaderProjects(recent, config.RecentProject{})
-	if len(got) != 1 || got[0].Name != "plain" {
-		t.Errorf("web header = %+v; b9s web cannot read a store through its namespace", got)
+	if lost := ProjectOpenTarget(project, "reader", nil); lost.Store != nil || lost.Dir != "" {
+		t.Errorf("target = %+v; without the registry the store's folder must not open as a checkout", lost)
+	}
+	if got := CheckoutFor(target); got.Store() == nil || got.Dir() != task.Dir() {
+		t.Errorf("checkout = %+v, want the store's", got)
+	}
+	headers := HeaderProjects([]config.RecentProject{config.RecentFromStore("task", task.Dir())}, config.RecentProject{})
+	if len(headers) != 1 || headers[0].Store != "task" {
+		t.Errorf("header = %+v, want the store kept", headers)
 	}
 }
 

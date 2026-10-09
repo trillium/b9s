@@ -71,7 +71,11 @@ func (m Model) activeCheckout() Checkout {
 // brainOpenTarget opens a store project as its store, or as nothing at all when
 // the registry no longer lists it.
 func (m Model) brainOpenTarget(project config.Project) datasource.OpenTarget {
-	store, ok := m.brain.store(project)
+	return brainOpenTarget(m.brain.registry, project)
+}
+
+func brainOpenTarget(registry *brain.Registry, project config.Project) datasource.OpenTarget {
+	store, ok := registry.Store(project.Store)
 	if !ok {
 		return datasource.OpenTarget{Name: project.Name}
 	}

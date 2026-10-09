@@ -231,7 +231,7 @@ In brain mode:
 | `--no-brain`, `B9S_BRAIN=off` | Ignore the registry |
 | `BRAIN_STORES_FILE` | Read this registry file instead of `~/.config/brain/stores.yaml` |
 
-`b9s web` does not serve stores yet. See [ADR 0052](docs/adr/0052-read-and-write-brain-stores-through-their-namespace.md).
+`b9s web` serves the same stores: the project sheet lists every store, a store shows its own beads, the all-projects view is the wide read, and writes run the store's wrapper. It takes `--store`, `--brain` and `--no-brain` too. See [ADR 0052](docs/adr/0052-read-and-write-brain-stores-through-their-namespace.md).
 
 ## Data sources
 

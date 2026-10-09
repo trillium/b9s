@@ -212,7 +212,7 @@ func checkFields(fields map[string]string, allowed map[string]bool) (map[string]
 // run executes plan in the checkout of the project on screen. The writer
 // refuses a read-only project itself, with the message the TUI shows.
 func (s *Server) run(req WriteRequest, plan writePlan) WriteResult {
-	s.opts.Writer.SetCheckout(checkoutFor(s.opts.Store.CheckoutDir()))
+	s.opts.Writer.SetCheckout(s.opts.Store.Checkout())
 	msg := plan(s.opts.Writer)()
 	res, ok := msg.(ui.BdResultMsg)
 	if !ok {
@@ -229,11 +229,6 @@ func (s *Server) run(req WriteRequest, plan writePlan) WriteResult {
 		out.Error = res.Error.Error()
 	}
 	return out
-}
-
-func checkoutFor(dir string) ui.Checkout {
-	checkout, _ := ui.NewCheckout(dir)
-	return checkout
 }
 
 // idempotency remembers recent write results by client key, so a request

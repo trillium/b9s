@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/internal/datasource"
 	"github.com/vanderheijden86/b9s/pkg/config"
 	"github.com/vanderheijden86/b9s/pkg/ui"
@@ -32,6 +33,9 @@ type Options struct {
 	Projects func() []config.Project
 	// StartupUser is the Dolt user projects without a checkout are read as.
 	StartupUser string
+	// Brain is brain's store registry in brain mode, nil otherwise. A project
+	// that names a store is opened and counted through it (ADR 0052).
+	Brain *brain.Registry
 	// Assets is the built SPA. Nil serves the embedded bundle.
 	Assets fs.FS
 	// Heartbeat is the SSE keep-alive interval; zero means 15 seconds.
@@ -272,7 +276,7 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projects := s.opts.Projects()
-	counts, reach := ui.ProbeProjects(projects, s.opts.StartupUser)
+	counts, reach := ui.ProbeProjects(projects, s.opts.StartupUser, s.opts.Brain)
 	active := s.opts.Store.Info().Key
 
 	entries := make([]ProjectEntry, 0, len(projects))
@@ -315,7 +319,7 @@ func (s *Server) handleOpenProject(w http.ResponseWriter, r *http.Request) {
 	}
 	projects := s.opts.Projects()
 	if req.Key == AllProjectsKey {
-		if err := s.opts.Store.OpenAll(ui.AllProjectsDBs(projects, s.opts.StartupUser)); err != nil {
+		if err := s.opts.Store.OpenAll(ui.AllProjectsDBs(projects, s.opts.StartupUser, s.opts.Brain)); err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
@@ -326,7 +330,14 @@ func (s *Server) handleOpenProject(w http.ResponseWriter, r *http.Request) {
 		if ui.ProjectKey(p) != req.Key {
 			continue
 		}
-		if failure := s.opts.Store.Open(ui.ProjectOpenTarget(p, s.opts.StartupUser), req.Key); failure != nil {
+		target := ui.ProjectOpenTarget(p, s.opts.StartupUser, s.opts.Brain)
+		if p.Store != "" && target.Store == nil {
+			// The registry no longer lists the store; its folder read as a
+			// plain checkout would show every store on the database.
+			writeError(w, http.StatusNotFound, p.Name+" is not a store in the brain registry")
+			return
+		}
+		if failure := s.opts.Store.Open(target, req.Key); failure != nil {
 			writeError(w, http.StatusBadGateway, failure.Message())
 			return
 		}

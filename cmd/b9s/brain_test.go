@@ -179,20 +179,33 @@ func TestChooseStartupProjectNeverOpensARecentStoreAsAFolder(t *testing.T) {
 	}
 }
 
-func TestWebRefusesABrainStoreFolder(t *testing.T) {
-	task, _ := brainHome(t)
-	var stderr bytes.Buffer
-	if !refuseBrainStoreForWeb(task, &stderr) {
-		t.Fatal("b9s web in a store's folder would serve the whole shared database")
+func TestWithBrainStoresAddsTheRestOfTheRegistryAfterTheRecentOnes(t *testing.T) {
+	reg := &brain.Registry{Stores: []brain.Store{
+		{Name: "brain", Path: "/srv/brain/.beads"},
+		{Name: "task", Path: "/srv/task/.beads"},
+	}}
+	recent := []config.Project{{Name: "task", Path: "/srv/task", Store: "task"}, {Name: "plain", Path: "/work/plain"}}
+
+	got := withBrainStores(recent, reg)
+
+	var names []string
+	for _, p := range got {
+		names = append(names, p.Name)
 	}
-	if !strings.Contains(stderr.String(), "brain store task") {
-		t.Errorf("stderr = %q", stderr.String())
+	if strings.Join(names, ",") != "task,plain,brain" {
+		t.Errorf("projects = %v; the recent ones keep their slots and the unlisted store follows", names)
 	}
-	if refuseBrainStoreForWeb(t.TempDir(), &bytes.Buffer{}) {
-		t.Error("an ordinary folder is served as before")
+	if plain := withBrainStores(recent, nil); len(plain) != 2 {
+		t.Errorf("without a registry the list is unchanged, got %v", plain)
 	}
-	t.Setenv(brain.EnvMode, "off")
-	if refuseBrainStoreForWeb(task, &bytes.Buffer{}) {
-		t.Error("B9S_BRAIN=off restores the old behaviour")
+}
+
+func TestStartupKeyOfAStoreIsItsName(t *testing.T) {
+	store := brain.Store{Name: "task", Path: "/srv/task/.beads"}
+	if got := startupKey("task", "/srv/task", &store); got != "brain:task" {
+		t.Errorf("key = %q", got)
+	}
+	if got := startupKey("plain", "/work/plain", nil); got != "/work/plain" {
+		t.Errorf("key = %q", got)
 	}
 }

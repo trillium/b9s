@@ -107,6 +107,13 @@ flowchart LR
   database unchecked, so b9s refuses and says how to fix it. bd's output
   reaches the user unchanged, in the footer and in a popup that holds a
   refusal longer than one line, such as a guard hook's reason after its path.
+- **`b9s web`.** The browser serves the same stores. The project sheet lists
+  every store of the registry (the recent ones first, then the rest), opens
+  one through its namespace, counts each through its own, and offers the wide
+  read as the all-projects view. A write runs the store's command through the
+  same `IssueWriter`, and a refusal comes back as the 422 error. `--store`,
+  `--brain` and `--no-brain` work as in the terminal. A store the registry no
+  longer lists is refused (404) instead of being opened as a folder.
 - **Sources of truth stay where they were.** b9s still never writes the
   database. Brain's repository is not changed.
 
@@ -133,10 +140,9 @@ flowchart LR
   expects its stores; an opt-in flag would leave the default b9s showing every
   store as every store. Auto-detection with `--no-brain` is the safer default
   here, and a machine without brain is untouched.
-- **Support `b9s web`.** Not now. The web server opens one project from a
-  folder or database and has no store identity, so it leaves stores out of its
-  header and refuses to start in a store's folder, rather than serve a store
-  unscoped.
+- **Leave `b9s web` as it was.** Rejected: the intent is that the browser
+  shares every store on the shared database, and a web server that read a
+  store's folder whole would show every store as that store.
 
 ## Consequences
 

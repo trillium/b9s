@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/internal/datasource"
 	"github.com/vanderheijden86/b9s/pkg/config"
 	"github.com/vanderheijden86/b9s/pkg/model"
@@ -15,17 +16,25 @@ func ResolveActor(projectDir string) string {
 	return defaultActorLookup.actor(projectDir)
 }
 
-// HeaderProjects is the project list the TUI header numbers 1-9. A brain store
-// is left out: b9s web serves checkouts and databases, and a store read that
-// way would show the beads of every store on its database (ADR 0052).
+// HeaderProjects is the project list the TUI header numbers 1-9.
 func HeaderProjects(recent []config.RecentProject, active config.RecentProject) []config.Project {
-	var projects []config.Project
-	for _, p := range headerProjects(recent, active) {
-		if p.Store == "" {
-			projects = append(projects, p)
-		}
+	return headerProjects(recent, active)
+}
+
+// StoreProject is the project a brain store is shown as.
+func StoreProject(store brain.Store) config.Project {
+	return storeProject(store)
+}
+
+// CheckoutFor is the checkout writes for the project opened from target run
+// in: the store's own for a brain store. The zero Checkout makes it read-only.
+func CheckoutFor(target datasource.OpenTarget) Checkout {
+	if target.Store != nil {
+		checkout, _ := NewStoreCheckout(*target.Store)
+		return checkout
 	}
-	return projects
+	checkout, _ := NewCheckout(target.Dir)
+	return checkout
 }
 
 // IsClosedLike reports whether status counts as closed in filters and counts.
@@ -46,8 +55,8 @@ type ProjectCounts struct {
 
 // ProbeProjects loads every project in parallel, as the header does, and
 // returns counts and reachability keyed by ProjectKey.
-func ProbeProjects(projects []config.Project, startupUser string) (map[string]ProjectCounts, map[string]datasource.Reachability) {
-	counts, reach := probeProjects(projects, startupUser, nil)
+func ProbeProjects(projects []config.Project, startupUser string, registry *brain.Registry) (map[string]ProjectCounts, map[string]datasource.Reachability) {
+	counts, reach := probeProjects(projects, startupUser, registry)
 	out := make(map[string]ProjectCounts, len(counts))
 	for key, c := range counts {
 		out[key] = ProjectCounts{Open: c.open, InProgress: c.inProgress, Ready: c.ready, Blocked: c.blocked}
@@ -57,11 +66,17 @@ func ProbeProjects(projects []config.Project, startupUser string) (map[string]Pr
 
 // ProjectOpenTarget is what the header opens for project: its checkout, or its
 // database read as the startup user when it has none.
-func ProjectOpenTarget(project config.Project, startupUser string) datasource.OpenTarget {
+func ProjectOpenTarget(project config.Project, startupUser string, registry *brain.Registry) datasource.OpenTarget {
+	if project.Store != "" {
+		return brainOpenTarget(registry, project)
+	}
 	return openTargetFor(project, startupUser)
 }
 
 // AllProjectsDBs lists the databases the all-projects view combines.
-func AllProjectsDBs(projects []config.Project, startupUser string) []datasource.DoltDBInfo {
+func AllProjectsDBs(projects []config.Project, startupUser string, registry *brain.Registry) []datasource.DoltDBInfo {
+	if registry != nil {
+		return datasource.BrainDBs(registry)
+	}
 	return allProjectsDBsFor(projects, startupUser)
 }

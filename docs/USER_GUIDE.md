@@ -547,7 +547,7 @@ On a machine with brain, a fork of Beads whose named stores share one Dolt datab
 - **`0`** is brain's wide read: every store's beads in one read-only view. `project:<store>` finds one store's beads in it.
 - **Writes** (`Ctrl-N`, `e`, `S`, `K`, `Delete`) run the store's own command, `~/.local/bin/<store>`, so brain's guard hooks, prefix ownership and render apply. When brain refuses a change, a popup shows its message unchanged and nothing is created. If the store has no wrapper, b9s runs `bd` with the store's `BD_NAME` and `BEADS_DIR`, and only when that `bd` is brain's.
 - **A store is read from its Dolt server only.** A JSONL, SQLite or embedded copy beside it could hold other stores' beads, so b9s never falls back to one.
-- **`b9s web` does not serve stores yet.**
+- **`b9s web` serves the stores too**: its project sheet lists every store of the registry, and `--store`, `--brain` and `--no-brain` work as above.
 
 See [ADR 0052](adr/0052-read-and-write-brain-stores-through-their-namespace.md).
 
