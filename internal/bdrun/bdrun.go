@@ -68,7 +68,14 @@ var ErrCancelled = errors.New("bd cancelled")
 // deadline at all, and Run reports it as success: nothing about the run
 // itself failed.
 func Run(ctx context.Context, bdPath, dir string, args ...string) (output string, err error) {
-	cmd := command(ctx, bdPath, dir, nil, args)
+	return RunWithEnv(ctx, bdPath, dir, nil, args...)
+}
+
+// RunWithEnv is Run with env entries appended to the inherited environment,
+// so they override it. A brain store without a wrapper runs plain bd with its
+// BD_NAME and BEADS_DIR this way (ADR 0052).
+func RunWithEnv(ctx context.Context, bdPath, dir string, env []string, args ...string) (output string, err error) {
+	cmd := command(ctx, bdPath, dir, env, args)
 	start := time.Now()
 	out, runErr := cmd.CombinedOutput()
 	trimmed := strings.TrimSpace(string(out))

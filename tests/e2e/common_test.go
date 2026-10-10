@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 	// Prevent any test from accidentally opening a browser
 	os.Setenv("B9S_NO_BROWSER", "1")
 	os.Setenv("B9S_TEST_MODE", "1")
+	// A developer machine with brain installed has a store registry; the suite
+	// tests b9s as it runs without one.
+	os.Setenv("B9S_BRAIN", "off")
 
 	// b9s saves the projects it opens into its user config. Every binary a test
 	// starts inherits this directory, so fixture projects never reach the

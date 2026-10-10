@@ -372,3 +372,42 @@ func TestRecentFromCheckout_EmbeddedProjectIsIdentifiedByPath(t *testing.T) {
 		t.Errorf("RecentFromCheckout = %+v, %v; want %+v, true: an embedded store lives in the checkout", got, ok, want)
 	}
 }
+
+// Brain's stores share one Dolt database and may share a folder, so neither
+// identifies one: the store name does (ADR 0052).
+func TestTouchRecent_TellsStoresOnOneDatabaseApart(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.RecentProjects = []RecentProject{RecentFromStore("task", "/srv/shared")}
+
+	if !cfg.TouchRecent(RecentFromStore("brain", "/srv/shared")) {
+		t.Fatal("a second store in the same folder is a new project")
+	}
+	if got, want := recentNames(cfg.RecentProjects), []string{"brain", "task"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("recent = %v, want %v", got, want)
+	}
+	if cfg.TouchRecent(RecentFromStore("task", "/srv/shared")) {
+		t.Error("a store already listed keeps its slot")
+	}
+}
+
+func TestSameProject_AStoreIsNeverACheckoutOfItsFolder(t *testing.T) {
+	store := RecentFromStore("task", "/srv/task")
+	checkout := RecentProject{Name: "task", Path: "/srv/task"}
+	if store.SameProject(checkout) || checkout.SameProject(store) {
+		t.Error("a store and a plain checkout of the same folder are different projects: only the store is read through its namespace")
+	}
+}
+
+func TestSaveRecentTo_KeepsTheStoreName(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "config.yaml")
+	if err := SaveRecentTo(file, []RecentProject{RecentFromStore("task", "/srv/task")}, false); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.RecentProjects) != 1 || cfg.RecentProjects[0].Store != "task" {
+		t.Errorf("recent = %+v", cfg.RecentProjects)
+	}
+}

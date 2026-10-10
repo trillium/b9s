@@ -246,3 +246,29 @@ func TestForgetProbe_MissingCacheIsNotAnError(t *testing.T) {
 		t.Errorf("ForgetProbe on a missing cache = %v, want nil", err)
 	}
 }
+
+// brainBdScript lists the --wide flag brain's fork adds to every command.
+const brainBdScript = `#!/bin/sh
+echo "Global Flags:"
+echo "      --wide   Wide view: read every store's beads on the unified database"
+`
+
+func TestProbeBrain_BrainsBdHasTheWideFlag(t *testing.T) {
+	if !ProbeBrain(context.Background(), installFakeBd(t, brainBdScript)) {
+		t.Error("a bd that lists --wide is brain's")
+	}
+}
+
+func TestProbeBrain_StockBdIsNotBrains(t *testing.T) {
+	if ProbeBrain(context.Background(), installFakeBd(t, stockBdScript)) {
+		t.Error("a stock bd must not be taken for brain's: it ignores BD_NAME")
+	}
+}
+
+func TestRunWithEnv_AddsToTheInheritedEnvironment(t *testing.T) {
+	bd := installFakeBd(t, "#!/bin/sh\necho \"$BD_NAME:$BEADS_DIR\"\n")
+	out, err := RunWithEnv(context.Background(), bd, t.TempDir(), []string{"BD_NAME=task", "BEADS_DIR=/x/.beads"}, "list")
+	if err != nil || out != "task:/x/.beads" {
+		t.Errorf("RunWithEnv = %q, %v", out, err)
+	}
+}

@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/internal/datasource"
 	"github.com/vanderheijden86/b9s/pkg/config"
 	"github.com/vanderheijden86/b9s/pkg/debug"
@@ -51,6 +52,10 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 	banner := fs.String("banner", "", "Show this `text` in a thin strip above the board")
 	bannerLink := fs.String("banner-link", "", "Link the banner to this http(s) `url`")
 	debugFlag := fs.Bool("debug", false, "Enable debug logging to .b9s/debug.log")
+	var brainOpts brainFlags
+	fs.BoolVar(&brainOpts.on, "brain", false, "Require brain mode: brain's stores are the projects (default: on when ~/.config/brain/stores.yaml exists)")
+	fs.BoolVar(&brainOpts.off, "no-brain", false, "Ignore the brain store registry")
+	fs.StringVar(&brainOpts.store, "store", "", "Serve this brain `store` first (implies --brain)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: b9s web [flags]")
 		fmt.Fprintln(stderr, "\nServes the mobile web UI for the project in this folder.")
@@ -114,9 +119,18 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 	applyMemoryLever(appCfg)
 	startupBeadsDir, _ := loader.GetBeadsDir("")
 	startupDir := filepath.Dir(startupBeadsDir)
+	brainStart, err := resolveBrain(brainOpts, startupDir, os.Getenv("BD_NAME"), stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "b9s web: %v\n", err)
+		return 2
+	}
+	startupName := filepath.Base(startupDir)
+	if brainStart.Store != nil {
+		startupName, startupDir = brainStart.Store.Name, brainStart.Store.Dir()
+	}
 	// Never fall back to another project: a server started in the wrong
 	// folder must fail rather than serve other data to a phone.
-	choice, err := chooseStartupProject(filepath.Base(startupDir), startupDir, &appCfg, false, datasource.OpenProject)
+	choice, err := chooseStartupProject(startupName, startupDir, brainStart.Store, brainStart.Registry, &appCfg, false, datasource.OpenProject)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -128,13 +142,13 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 
 	store := web.NewStore(appCfg.RefreshPollInterval())
 	defer store.Close()
-	if failure := store.Open(datasource.OpenTarget{Name: choice.Name, Dir: choice.Dir}, startupKey(choice.Name, choice.Dir)); failure != nil {
+	if failure := store.Open(openTarget(choice.Name, choice.Dir, choice.Store), startupKey(choice.Name, choice.Dir, choice.Store)); failure != nil {
 		fmt.Fprint(stderr, formatOpenFailure(failure))
 		return 1
 	}
 	// A public server writes no config: it serves one fixed project.
 	if cfgErr == nil && !*public {
-		if recent, ok := config.RecentFromCheckout(choice.Name, choice.Dir); ok {
+		if recent, ok := startupRecent(choice, choice.Name, choice.Dir); ok {
 			rememberRecent(recent)
 		}
 	}
@@ -144,6 +158,7 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 		Writer:       ui.NewIssueWriter(),
 		Auth:         auth,
 		StartupUser:  startupUser,
+		Brain:        brainStart.Registry,
 		InitialQuery: *filter,
 		Public:       *public,
 		Banner:       *banner,
@@ -153,11 +168,12 @@ func runWeb(args []string, stdout, stderr io.Writer) int {
 			if err != nil {
 				cfg = appCfg
 			}
-			return withCheckoutsUnder(ui.HeaderProjects(cfg.RecentProjects, recentFromTarget(store.Target())), *projectsRoot)
+			projects := withCheckoutsUnder(ui.HeaderProjects(cfg.RecentProjects, recentFromTarget(store.Target())), *projectsRoot)
+			return withBrainStores(projects, brainStart.Registry)
 		},
 		Opened: func(p config.Project) {
 			if cfgErr == nil && !*public {
-				rememberRecent(config.RecentProject{Name: p.Name, Database: p.Database, Host: p.Host, Path: p.Path})
+				rememberRecent(config.RecentProject{Name: p.Name, Database: p.Database, Host: p.Host, Path: p.Path, Store: p.Store})
 			}
 		},
 	})
@@ -248,8 +264,32 @@ func withCheckoutsUnder(projects []config.Project, root string) []config.Project
 	return projects
 }
 
-// startupKey is the project key the header gives the startup checkout.
-func startupKey(name, dir string) string {
+// withBrainStores appends every store of the registry that projects does not
+// already hold, in name order, so a board on the shared database reaches all
+// of its stores and not only the nine recent ones.
+func withBrainStores(projects []config.Project, registry *brain.Registry) []config.Project {
+	if registry == nil {
+		return projects
+	}
+	listed := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		if p.Store != "" {
+			listed[p.Store] = true
+		}
+	}
+	for _, store := range registry.Stores {
+		if !listed[store.Name] {
+			projects = append(projects, ui.StoreProject(store))
+		}
+	}
+	return projects
+}
+
+// startupKey is the project key the header gives the startup project.
+func startupKey(name, dir string, store *brain.Store) string {
+	if store != nil {
+		return ui.ProjectKey(ui.StoreProject(*store))
+	}
 	return ui.ProjectKey(config.Project{Name: name, Path: dir})
 }
 
@@ -360,6 +400,9 @@ func printQR(w io.Writer, url string) {
 // A checkout names its server in .beads/metadata.json, which is read again on
 // each call because the open project changes when the browser switches.
 func recentFromTarget(target datasource.OpenTarget) config.RecentProject {
+	if target.Store != nil {
+		return config.RecentFromStore(target.Store.Name, target.Dir)
+	}
 	if target.Dolt != nil {
 		return config.RecentProject{Name: target.Name, Path: target.Dir, Database: target.Dolt.Database, Host: target.Dolt.Path}
 	}

@@ -14,7 +14,7 @@ func headerProjects(recent []config.RecentProject, startup config.RecentProject)
 	projects := make([]config.Project, 0, len(recent)+1)
 	startupListed := startup.Path == ""
 	for _, r := range recent {
-		row := config.Project{Name: r.Name, Path: r.Path, Database: r.Database, Host: r.Host}
+		row := config.Project{Name: r.Name, Path: r.Path, Database: r.Database, Host: r.Host, Store: r.Store}
 		if !startupListed && r.SameProject(startup) {
 			startupListed = true
 			row.Name, row.Path = startup.Name, startup.Path
@@ -22,7 +22,7 @@ func headerProjects(recent []config.RecentProject, startup config.RecentProject)
 		projects = append(projects, row)
 	}
 	if !startupListed {
-		projects = append([]config.Project{{Name: startup.Name, Path: startup.Path, Database: startup.Database, Host: startup.Host}}, projects...)
+		projects = append([]config.Project{{Name: startup.Name, Path: startup.Path, Database: startup.Database, Host: startup.Host, Store: startup.Store}}, projects...)
 	}
 	return projects
 }

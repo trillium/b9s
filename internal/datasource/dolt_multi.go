@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/pkg/debug"
 	"github.com/vanderheijden86/b9s/pkg/model"
 )
@@ -25,6 +26,8 @@ type DoltDBInfo struct {
 	Port     int    // e.g., 3306
 	User     string // e.g., "root"
 	Database string // e.g., "LP_Team"
+	// Brain reads a brain database wide instead of whole (ADR 0052).
+	Brain *brain.Scope
 }
 
 // DiscoverDoltDBs scans all project paths and returns Dolt database info for each
@@ -65,6 +68,7 @@ func NewMultiDoltReader(dbs []DoltDBInfo) (*MultiDoltReader, error) {
 			Path:     db.Host,
 			Database: db.Database,
 			User:     db.User,
+			Brain:    db.Brain,
 		}
 		reader, err := NewDoltReader(source)
 		if err != nil {

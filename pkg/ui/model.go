@@ -14,6 +14,7 @@ import (
 
 	"github.com/vanderheijden86/b9s/internal/attachref"
 	"github.com/vanderheijden86/b9s/internal/blobstore"
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/internal/datasource"
 	"github.com/vanderheijden86/b9s/pkg/config"
 	"github.com/vanderheijden86/b9s/pkg/debug"
@@ -300,10 +301,10 @@ func pickerRefreshTickCmd() tea.Cmd {
 	})
 }
 
-func loadProjectCountsCmd(projects []config.Project, startupUser string) tea.Cmd {
+func loadProjectCountsCmd(projects []config.Project, startupUser string, registry *brain.Registry) tea.Cmd {
 	projects = append([]config.Project(nil), projects...)
 	return func() tea.Msg {
-		counts, reach := probeProjects(projects, startupUser)
+		counts, reach := probeProjects(projects, startupUser, registry)
 		return projectCountsLoadedMsg{counts: counts, reach: reach}
 	}
 }
@@ -311,7 +312,7 @@ func loadProjectCountsCmd(projects []config.Project, startupUser string) tea.Cmd
 // probeProjects loads every project's issues in parallel and reports their
 // counts and how reachable each one is. A project with neither a checkout nor
 // a database has no entry in either map.
-func probeProjects(projects []config.Project, startupUser string) (map[string]projectCounts, map[string]datasource.Reachability) {
+func probeProjects(projects []config.Project, startupUser string, registry *brain.Registry) (map[string]projectCounts, map[string]datasource.Reachability) {
 	{
 		type result struct {
 			key    string
@@ -323,6 +324,18 @@ func probeProjects(projects []config.Project, startupUser string) (map[string]pr
 		for _, project := range projects {
 			go func(project config.Project) {
 				key := projectKey(project)
+				if project.Store != "" {
+					// A store is counted through its own namespace; a store the
+					// registry lost has nothing to count.
+					store, ok := registry.Store(project.Store)
+					if !ok {
+						results <- result{key: key, err: errNoCheckout}
+						return
+					}
+					issues, err := datasource.LoadIssuesFromStore(store)
+					results <- result{key: key, counts: summarizeProjectIssues(issues), err: err}
+					return
+				}
 				if beadsDir, ok := projectBeadsDir(project.ResolvedPath()); ok {
 					// The checkout's own source decides its reachability; its
 					// JSONL export must not answer for a database it cannot read.
@@ -491,6 +504,7 @@ type Model struct {
 	startupDoltHost  string       // Server the startup project connects to; :project lists its databases
 	showProjectTable bool
 	projectTable     ProjectTableModel
+	brain            brainMode // brain's stores as projects (ADR 0052); zero without brain
 
 	openProject         projectOpenFunc
 	projectSwitch       projectSwitch
@@ -1234,9 +1248,10 @@ func (m Model) WithConfig(cfg config.Config, projectName, projectPath string) Mo
 	m.tree.SetSort(sortFromConfig(cfg.UI.Sort))
 	m.activeProjectName = projectName
 	m.activeProjectPath = projectPath
-	m.activeProjectServer, _ = config.RecentFromCheckout(projectName, projectPath)
-	checkout, _ := NewCheckout(projectPath)
-	m.issueWriter.SetCheckout(checkout)
+	if m.brain.activeStore == "" {
+		m.activeProjectServer, _ = config.RecentFromCheckout(projectName, projectPath)
+	}
+	m.issueWriter.SetCheckout(m.activeCheckout())
 	m.board.SetActiveProjectName(projectName)
 	if view, ok := ParseBoardEpicView(cfg.UI.BoardEpics); ok {
 		m.board.SetEpicView(view)
@@ -1332,7 +1347,7 @@ func (m Model) Init() tea.Cmd {
 	}
 	// Load picker counts outside the update loop, then schedule periodic refreshes.
 	if len(m.allProjects) > 1 {
-		cmds = append(cmds, loadProjectCountsCmd(m.allProjects, m.startupDoltUser))
+		cmds = append(cmds, loadProjectCountsCmd(m.allProjects, m.startupDoltUser, m.brain.registry))
 	}
 	return tea.Batch(cmds...)
 }
@@ -1605,6 +1620,9 @@ func (m Model) dispatchMsg(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.statusMsg = errMsg
 			m.statusIsError = true
+			if m.brain.activeStore != "" {
+				m.brain.refusal = errMsg
+			}
 		}
 
 	case attachmentOpenResultMsg:
@@ -1725,7 +1743,7 @@ func (m Model) dispatchMsg(msg tea.Msg) (Model, tea.Cmd) {
 	case PickerRefreshTickMsg:
 		// Periodic refresh of project picker counts (bd-8yc)
 		if len(m.allProjects) > 0 {
-			return m, loadProjectCountsCmd(m.allProjects, m.startupDoltUser)
+			return m, loadProjectCountsCmd(m.allProjects, m.startupDoltUser, m.brain.registry)
 		}
 		return m, nil
 
@@ -2066,7 +2084,10 @@ func (m Model) dispatchMsg(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		var newIssues []model.Issue
 		var err error
-		if beadsDir, hasCheckout := projectBeadsDir(m.activeProjectPath); m.sourceType == datasource.SourceTypeDolt && !hasCheckout {
+		if m.brain.activeStore != "" {
+			debug.Log("FileChangedMsg: reloading store %s through its scoped source", m.brain.activeStore)
+			newIssues, err = m.reloadActiveStore()
+		} else if beadsDir, hasCheckout := projectBeadsDir(m.activeProjectPath); m.sourceType == datasource.SourceTypeDolt && !hasCheckout {
 			// A project opened without a checkout has only its database.
 			debug.Log("FileChangedMsg: reloading via datasource.LoadFromSource (Dolt, no checkout, db=%s)", m.doltSource.Database)
 			newIssues, err = datasource.LoadFromSource(m.doltSource)
@@ -2452,6 +2473,13 @@ func (m Model) dispatchMsg(msg tea.Msg) (Model, tea.Cmd) {
 			var tableCmd tea.Cmd
 			m, tableCmd = m.handleProjectTableKeys(msg)
 			return m, tableCmd
+		}
+
+		if m.brain.refusal != "" {
+			if msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m.handleWriteRefusalKeys(msg), nil
 		}
 
 		if m.showOpenFailure {
@@ -4295,6 +4323,9 @@ func (m Model) View() string {
 		isOverlay = true
 	} else if m.showRepoPicker {
 		body = m.repoPicker.View()
+		isOverlay = true
+	} else if m.brain.refusal != "" {
+		body = m.renderWriteRefusalPopup()
 		isOverlay = true
 	} else if m.showOpenFailure {
 		body = m.renderOpenFailurePopup()

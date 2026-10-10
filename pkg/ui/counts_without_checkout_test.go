@@ -29,7 +29,7 @@ func chdirIntoProjectWithOpenIssue(t *testing.T) {
 func TestProjectCountsSkipProjectWithoutCheckout(t *testing.T) {
 	chdirIntoProjectWithOpenIssue(t)
 
-	msg := loadProjectCountsCmd([]config.Project{{Name: "remote", Database: "remote_db", Host: "127.0.0.1:1"}}, "")()
+	msg := loadProjectCountsCmd([]config.Project{{Name: "remote", Database: "remote_db", Host: "127.0.0.1:1"}}, "", nil)()
 
 	loaded, ok := msg.(projectCountsLoadedMsg)
 	if !ok {

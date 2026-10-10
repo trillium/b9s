@@ -17,6 +17,7 @@ b9s is a keyboard-driven terminal UI for [Beads](https://github.com/steveyegge/b
 - [Memory Beads preview](#memory-beads-preview)
 - [Command prompt](#command-prompt)
 - [Projects](#projects)
+- [Brain stores](#brain-stores)
 - [Data sources](#data-sources)
 - [Configuration](#configuration)
 - [Help and tutorial](#help-and-tutorial)
@@ -533,8 +534,22 @@ b9s loads a project before it replaces the one on screen. While it loads, the st
 | Unreadable | no issues file or Dolt configuration could be read |
 | Timed out | the project did not open within 10 seconds |
 | bd not found | the project uses embedded Dolt, and `bd` is not on `PATH` |
+| Not a brain store | a recent project names a [brain store](#brain-stores) that the registry no longer lists |
 
 Press `r` in the popup to retry. When the folder b9s starts in cannot be opened, b9s opens the recent project that last opened successfully and shows the same popup. With `--no-fallback`, or without a terminal, it exits with status 1 instead, so a script never acts on the wrong project. See [ADR 0012](adr/0012-open-a-project-before-replacing-the-visible-one.md).
+
+## Brain stores
+
+On a machine with brain, a fork of Beads whose named stores share one Dolt database, b9s lists brain's stores as projects. It switches on by itself when `~/.config/brain/stores.yaml` lists a store. `--no-brain` or `B9S_BRAIN=off` ignores that file, `--brain` fails when it is missing, and `--store <name>` opens a store from any folder.
+
+- **`:project`** lists the registry's stores, and a store you open takes a number key in the header. Stores that share a folder or a database stay separate projects.
+- **A store shows its own beads only**: those whose id starts with a prefix recorded for it in `brain_store_prefixes`, the set `bd list` returns in that store. The title bar names the Dolt server it reads.
+- **`0`** is brain's wide read: every store's beads in one read-only view. `project:<store>` finds one store's beads in it.
+- **Writes** (`Ctrl-N`, `e`, `S`, `K`, `Delete`) run the store's own command, `~/.local/bin/<store>`, so brain's guard hooks, prefix ownership and render apply. When brain refuses a change, a popup shows its message unchanged and nothing is created. If the store has no wrapper, b9s runs `bd` with the store's `BD_NAME` and `BEADS_DIR`, and only when that `bd` is brain's.
+- **A store is read from its Dolt server only.** A JSONL, SQLite or embedded copy beside it could hold other stores' beads, so b9s never falls back to one.
+- **`b9s web` serves the stores too**: its project sheet lists every store of the registry, and `--store`, `--brain` and `--no-brain` work as above.
+
+See [ADR 0052](adr/0052-read-and-write-brain-stores-through-their-namespace.md).
 
 ## Data sources
 
@@ -627,6 +642,8 @@ b9s reads the file once at startup. See [ADR 0035](adr/0035-take-hotkeys-from-a-
 | `BEADS_DOLT_PASSWORD` | The password for the Dolt user in `metadata.json` |
 | `B9S_TRUSTED_DOLT_ENDPOINTS` | Comma-separated `host:port` entries that may receive that password, besides loopback |
 | `B9S_DEBUG` | `1` writes debug messages to stderr |
+| `B9S_BRAIN` | `on` requires a brain registry, `off` ignores it; the default turns brain mode on when `~/.config/brain/stores.yaml` lists a store |
+| `BRAIN_STORES_FILE` | The brain registry to read instead of `~/.config/brain/stores.yaml` |
 | `XDG_CONFIG_HOME` | Where `b9s/config.yaml` and `b9s/hotkeys.yaml` live; the default is `~/.config` |
 
 ## Help and tutorial
@@ -799,6 +816,7 @@ bind-key B new-window -c '#{pane_current_path}' "b9s --filter 'status:open label
 | `--filter '<query>'` | Start with a [query](#search) applied |
 | `--repo <prefix>` | Show only issues whose ID starts with the prefix, for example `api` |
 | `--no-fallback` | Exit with status 1 when the current folder cannot be opened |
+| `--store <name>`, `--brain`, `--no-brain` | Open a [brain store](#brain-stores), require brain mode, or ignore the brain registry |
 | `--debug` | Write a debug log to `.b9s/debug.log` |
 | `--cpu-profile <file>` | Write a CPU profile |
 | `--background-mode`, `--no-background-mode` | Turn the experimental background loader on or off for this run |

@@ -55,6 +55,10 @@ func main() {
 	debugFlag := flag.Bool("debug", false, "Enable debug logging to .b9s/debug.log")
 	noFallback := flag.Bool("no-fallback", false, "Exit when the current folder cannot be opened instead of opening the last project that worked")
 	reprobe := flag.Bool("reprobe", false, "Ask bd again whether it supports Memory Beads instead of using the cached answer")
+	var brainOpts brainFlags
+	flag.BoolVar(&brainOpts.on, "brain", false, "Require brain mode: brain's stores are the projects (default: on when ~/.config/brain/stores.yaml exists)")
+	flag.BoolVar(&brainOpts.off, "no-brain", false, "Ignore the brain store registry")
+	flag.StringVar(&brainOpts.store, "store", "", "Open this brain store at startup (implies --brain)")
 	flag.Parse()
 
 	// Debug logging to .b9s/debug.log
@@ -194,8 +198,18 @@ func main() {
 	// The startup folder respects BEADS_DIR and git worktrees.
 	startupBeadsDir, _ := loader.GetBeadsDir("")
 	startupDir := filepath.Dir(startupBeadsDir)
+	brainStart, err := resolveBrain(brainOpts, startupDir, os.Getenv("BD_NAME"), os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "b9s: %v\n", err)
+		os.Exit(2)
+	}
+	startupName := filepath.Base(startupDir)
+	if brainStart.Store != nil {
+		startupName, startupDir = brainStart.Store.Name, brainStart.Store.Dir()
+		startupBeadsDir = brainStart.Store.Path
+	}
 	interactive := !*noFallback && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
-	choice, err := chooseStartupProject(filepath.Base(startupDir), startupDir, &appCfg, interactive, datasource.OpenProject)
+	choice, err := chooseStartupProject(startupName, startupDir, brainStart.Store, brainStart.Registry, &appCfg, interactive, datasource.OpenProject)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -212,6 +226,11 @@ func main() {
 		beadsDir = filepath.Join(choice.Dir, ".beads")
 	}
 	beadsPath, _ := loader.FindJSONLPath(beadsDir)
+	if choice.Store != nil {
+		// A store shares its database with other stores, so an export beside it
+		// is never a source for it.
+		beadsPath = ""
+	}
 
 	// Detect source type and create Dolt watcher if applicable.
 	// If Dolt is detected but connection fails, fall back to JSONL/SQLite
@@ -222,10 +241,7 @@ func main() {
 	var doltSource datasource.DataSource
 	var doltFailure *ui.DoltFailure
 	sourceInfo := ""
-	if sources, discErr := datasource.DiscoverSources(datasource.DiscoveryOptions{
-		BeadsDir:               beadsDir,
-		ValidateAfterDiscovery: false,
-	}); discErr == nil {
+	if sources, discErr := startupSources(choice, beadsDir); discErr == nil {
 		debug.Log("datasource: discovered %d sources", len(sources))
 		for i, s := range sources {
 			debug.Log("datasource: source[%d] type=%s path=%s db=%s user=%s", i, s.Type, s.Path, s.Database, s.User)
@@ -293,7 +309,9 @@ func main() {
 
 	// Automatically ensure .bv/ is in .gitignore
 	projectDir := filepath.Dir(beadsDir)
-	_ = loader.EnsureBVInGitignore(projectDir)
+	if choice.Store == nil {
+		_ = loader.EnsureBVInGitignore(projectDir)
+	}
 
 	// Apply --repo filter if specified
 	if *repoFilter != "" {
@@ -336,7 +354,7 @@ func main() {
 	// project whose issues loaded reaches this point, so a folder that fails
 	// to open never takes a number key.
 	if cfgErr == nil {
-		if recent, ok := config.RecentFromCheckout(projectName, projectPath); ok {
+		if recent, ok := startupRecent(choice, projectName, projectPath); ok {
 			appCfg.TouchRecent(recent)
 			appCfg.MarkOpened(recent, time.Now())
 			if err := config.SaveRecentTo(config.ConfigPath(), appCfg.RecentProjects, appCfg.LockRecent); err != nil {
@@ -346,7 +364,12 @@ func main() {
 	}
 
 	// Launch TUI
+	activeStore := ""
+	if choice.Store != nil {
+		activeStore = choice.Store.Name
+	}
 	m := ui.NewModel(issues, beadsPath).
+		WithBrain(brainStart.Registry, activeStore).
 		WithSourceType(detectedSourceType).
 		WithDoltWatcher(doltWatcher).
 		WithDoltSource(doltSource).

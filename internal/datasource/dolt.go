@@ -1,6 +1,7 @@
 package datasource
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/pkg/debug"
 	"github.com/vanderheijden86/b9s/pkg/model"
 )
@@ -36,6 +38,7 @@ type DoltReader struct {
 	db             *sql.DB
 	addr           string
 	lastLoggedHash string // suppress repeated hash log lines
+	brain          *brain.Scope
 }
 
 // NewDoltReader opens a connection to a Dolt server using the MySQL protocol.
@@ -85,9 +88,45 @@ func NewDoltReader(source DataSource) (*DoltReader, error) {
 	}
 
 	return &DoltReader{
-		db:   db,
-		addr: source.Path,
+		db:    db,
+		addr:  source.Path,
+		brain: source.Brain,
 	}, nil
+}
+
+// brainNamespace resolves the reader's brain scope against the database as it
+// stands now, so a prefix claimed after the reader opened is honoured by the
+// next load. A reader without a scope reads everything.
+func (r *DoltReader) brainNamespace() (brain.Namespace, error) {
+	if r.brain == nil {
+		return brain.Namespace{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), brainResolveTimeout)
+	defer cancel()
+	ns, err := brain.Resolve(ctx, r.db, *r.brain)
+	if err != nil {
+		return brain.Namespace{}, fmt.Errorf("brain namespace: %w", err)
+	}
+	return ns, nil
+}
+
+// brainResolveTimeout bounds the few small queries that find a namespace.
+const brainResolveTimeout = 10 * time.Second
+
+// tagBrainOwners names, in a wide read, the store each issue belongs to. The
+// all-projects view and the project: predicate show it as the issue's project.
+// A bead whose prefix no store claimed shows its id prefix instead.
+func tagBrainOwners(ns brain.Namespace, issues []model.Issue) {
+	if !ns.Wide {
+		return
+	}
+	for i := range issues {
+		if owner := ns.Owner(issues[i].ID); owner != "" {
+			issues[i].SourceRepo = owner
+		} else if prefix, _, ok := strings.Cut(issues[i].ID, "-"); ok {
+			issues[i].SourceRepo = prefix
+		}
+	}
 }
 
 // Close closes the underlying database connection.
@@ -107,6 +146,12 @@ func (r *DoltReader) LoadIssues() ([]model.Issue, error) {
 // filter function to each scanned issue. Passing nil loads all issues.
 // Falls back to a minimal column set if the full-schema query fails.
 func (r *DoltReader) LoadIssuesFiltered(filter func(*model.Issue) bool) ([]model.Issue, error) {
+	ns, err := r.brainNamespace()
+	if err != nil {
+		return nil, err
+	}
+	namespace, namespaceArgs := ns.Clause()
+
 	// Query matches bd v0.63 schema. Labels are in a separate table.
 	// Uses due_at (bd schema) with COALESCE fallback for due_date (legacy).
 	query := `
@@ -117,13 +162,13 @@ func (r *DoltReader) LoadIssuesFiltered(filter func(*model.Issue) bool) ([]model
 			compacted_at, compacted_at_commit, original_size,
 			design, acceptance_criteria, notes, source_repo, defer_until
 		FROM issues
-		WHERE status != 'tombstone'
+		WHERE status != 'tombstone'` + namespace + `
 		ORDER BY updated_at DESC
 	`
 
 	debug.Log("dolt: QUERY issues (full schema, 22 cols) addr=%s", r.addr)
 	debug.Log("dolt: SQL: %s", strings.TrimSpace(query))
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, namespaceArgs...)
 	if err != nil {
 		if !doltMissingColumnError(err) {
 			// A transient failure (a dropped connection, a permissions
@@ -134,7 +179,7 @@ func (r *DoltReader) LoadIssuesFiltered(filter func(*model.Issue) bool) ([]model
 		}
 		// Fall back to minimal schema if some columns are absent.
 		debug.Log("dolt: full query FAILED (%v), falling back to simple query", err)
-		return r.loadIssuesSimple(filter)
+		return r.loadIssuesSimple(filter, ns)
 	}
 	defer rows.Close()
 
@@ -174,6 +219,7 @@ func (r *DoltReader) LoadIssuesFiltered(filter func(*model.Issue) bool) ([]model
 		debug.Log("dolt: comments unavailable, issues will report no comments: %v", commentsErr)
 	}
 	applyCreators(r.db, issues)
+	tagBrainOwners(ns, issues)
 
 	var result []model.Issue
 	for i := range issues {
@@ -222,16 +268,17 @@ func doltMissingColumnError(err error) bool {
 }
 
 // loadIssuesSimple is a fallback for Dolt databases with fewer columns.
-func (r *DoltReader) loadIssuesSimple(filter func(*model.Issue) bool) ([]model.Issue, error) {
+func (r *DoltReader) loadIssuesSimple(filter func(*model.Issue) bool, ns brain.Namespace) ([]model.Issue, error) {
+	namespace, namespaceArgs := ns.Clause()
 	query := `
 		SELECT id, title, description, status, priority, issue_type, created_at, updated_at
 		FROM issues
-		WHERE status != 'tombstone'
+		WHERE status != 'tombstone'` + namespace + `
 		ORDER BY updated_at DESC
 	`
 
 	debug.Log("dolt: QUERY issues (simple, 8 cols) addr=%s", r.addr)
-	rows, err := r.db.Query(query)
+	rows, err := r.db.Query(query, namespaceArgs...)
 	if err != nil {
 		debug.Log("dolt: simple query FAILED: %v", err)
 		return nil, fmt.Errorf("query failed: %w", err)
@@ -274,6 +321,7 @@ func (r *DoltReader) loadIssuesSimple(filter func(*model.Issue) bool) ([]model.I
 	}
 
 	applyCreators(r.db, issues)
+	tagBrainOwners(ns, issues)
 
 	// The simple fallback must load comments too, and report a failure
 	// rather than silently returning nil error with no comments at all
@@ -555,8 +603,13 @@ func (r *DoltReader) GetIssueByID(id string) (*model.Issue, error) {
 
 // CountIssues returns the count of non-tombstone issues.
 func (r *DoltReader) CountIssues() (int, error) {
+	ns, err := r.brainNamespace()
+	if err != nil {
+		return 0, err
+	}
+	namespace, namespaceArgs := ns.Clause()
 	var count int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM issues WHERE status != 'tombstone'").Scan(&count)
+	err = r.db.QueryRow("SELECT COUNT(*) FROM issues WHERE status != 'tombstone'"+namespace, namespaceArgs...).Scan(&count)
 	if err != nil {
 		debug.Log("dolt: COUNT(*) failed: %v", err)
 		return 0, err

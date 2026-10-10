@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/pkg/model"
 )
 
@@ -25,6 +26,7 @@ const (
 	OpenUnreadable
 	OpenTimedOut
 	OpenNoBD
+	OpenNoStore
 	openReasonEnd
 )
 
@@ -68,6 +70,8 @@ func (f *OpenFailure) Message() string {
 		return fmt.Sprintf("%s took too long to open", f.Project)
 	case OpenNoBD:
 		return fmt.Sprintf("%s uses embedded Dolt, which b9s reads through bd, and bd is not on PATH", f.location())
+	case OpenNoStore:
+		return fmt.Sprintf("%s is not a store in the brain registry", f.Project)
 	}
 	return ""
 }
@@ -111,6 +115,11 @@ func (f *OpenFailure) Try() []string {
 			"Install bd: https://github.com/steveyegge/beads",
 			"Check that bd runs in this shell: bd version",
 		}
+	case OpenNoStore:
+		return []string{
+			"List the registered stores: brain stores list",
+			"Add the store to the registry: brain stores add",
+		}
 	}
 	return nil
 }
@@ -128,6 +137,9 @@ type OpenTarget struct {
 	Name string
 	Dir  string
 	Dolt *DataSource
+	// Store opens the project as a brain store: read through its server and
+	// limited to its namespace (ADR 0052).
+	Store *brain.Store
 }
 
 // OpenedProject is a project whose issues loaded.
@@ -203,7 +215,13 @@ func openSources(target OpenTarget) ([]DataSource, *OpenFailure) {
 	if info, err := os.Stat(beadsDir); err != nil || !info.IsDir() {
 		return nil, &OpenFailure{Reason: OpenNotAProject, Project: target.Name, Dir: target.Dir, Err: err}
 	}
-	sources, err := DiscoverSources(loadDiscoveryOptions(beadsDir, target.Dir))
+	var sources []DataSource
+	var err error
+	if target.Store != nil {
+		sources, err = StoreSources(*target.Store)
+	} else {
+		sources, err = DiscoverSources(loadDiscoveryOptions(beadsDir, target.Dir))
+	}
 	if err == nil && len(sources) == 0 {
 		err = fmt.Errorf("no issues file or Dolt server configuration in %s", beadsDir)
 	}

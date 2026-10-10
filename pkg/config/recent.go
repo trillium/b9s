@@ -25,6 +25,9 @@ type RecentProject struct {
 	Database string `yaml:"database,omitempty"`
 	Host     string `yaml:"host,omitempty"`
 	Path     string `yaml:"path,omitempty"`
+	// Store names a brain store. Stores share a database and may share a
+	// folder, so the name alone identifies one (ADR 0052).
+	Store string `yaml:"store,omitempty"`
 	// OpenedAt is when this project's issues last loaded. It is never set for
 	// a project that failed to open, so it names a project known to work.
 	OpenedAt time.Time `yaml:"opened_at,omitempty"`
@@ -34,6 +37,9 @@ type RecentProject struct {
 // entry written by hand may lack the database of a Dolt checkout, and must
 // still match that checkout by path rather than gain a duplicate.
 func (p RecentProject) SameProject(other RecentProject) bool {
+	if p.Store != "" || other.Store != "" {
+		return p.Store == other.Store
+	}
 	if p.Database != "" && other.Database != "" {
 		return p.Host == other.Host && p.Database == other.Database
 	}
@@ -133,6 +139,12 @@ func (c *Config) migrateFavorites(legacy legacyConfig) {
 		}
 	}
 	c.RecentProjects = trimRecent(c.RecentProjects)
+}
+
+// RecentFromStore describes a brain store. It carries no database or host:
+// every store on a shared database would otherwise look like the same project.
+func RecentFromStore(store, dir string) RecentProject {
+	return RecentProject{Name: store, Store: store, Path: dir}
 }
 
 // RecentFromCheckout describes the Beads project checked out at path. A Dolt

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/vanderheijden86/b9s/internal/bdrun"
+	"github.com/vanderheijden86/b9s/internal/brain"
 	"github.com/vanderheijden86/b9s/pkg/debug"
 )
 
@@ -75,6 +76,38 @@ func (w *IssueWriter) IsAvailable() bool {
 	return w.available
 }
 
+// canRun reports whether a write can run: bd is on PATH, or the checkout is a
+// brain store whose own wrapper runs bd.
+func (w *IssueWriter) canRun() bool {
+	if w.available {
+		return true
+	}
+	store := w.checkout.Store()
+	return store != nil && store.Runner().Wrapper != ""
+}
+
+// invocation says what to execute for the checkout. A plain checkout runs bd
+// in its folder. A brain store runs through its wrapper, which pins the store,
+// its server and its render root. Without a wrapper it runs bd with the
+// store's BD_NAME and BEADS_DIR, but only a brain bd: upstream bd ignores
+// those pins and would write the shared database outside the store's checks.
+func (w *IssueWriter) invocation(ctx context.Context, store *brain.Store) (path string, env []string, err error) {
+	if store == nil {
+		return w.bdPath, nil, nil
+	}
+	runner := store.Runner()
+	if runner.Wrapper != "" {
+		return runner.Wrapper, nil, nil
+	}
+	if !w.available {
+		return "", nil, errors.New("bd CLI not found in PATH; install beads to edit issues")
+	}
+	if !bdrun.ProbeBrain(ctx, w.bdPath) {
+		return "", nil, fmt.Errorf("%s is not brain's bd, and store %s has no wrapper at ~/.local/bin/%s; run 'brain stores create' or put brain's bd first on PATH", w.bdPath, store.Name, store.Name)
+	}
+	return w.bdPath, runner.Env, nil
+}
+
 // Dir is the checkout bd runs in, or "" when writes are refused.
 func (w *IssueWriter) Dir() string {
 	if w == nil {
@@ -98,7 +131,7 @@ func (w *IssueWriter) SetOpening(project string) {
 
 // UpdateIssue runs bd update <id> with the given field values
 func (w *IssueWriter) UpdateIssue(id string, fields map[string]string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpUpdate, id)
 	}
 	args := w.buildUpdateArgs(id, fields)
@@ -107,7 +140,7 @@ func (w *IssueWriter) UpdateIssue(id string, fields map[string]string) tea.Cmd {
 
 // CreateIssue runs bd create with the given field values
 func (w *IssueWriter) CreateIssue(fields map[string]string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpCreate, "")
 	}
 	args := w.buildCreateArgs(fields)
@@ -116,7 +149,7 @@ func (w *IssueWriter) CreateIssue(fields map[string]string) tea.Cmd {
 
 // CloseIssue runs bd close <id> with optional reason
 func (w *IssueWriter) CloseIssue(id, reason string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpClose, id)
 	}
 	args := w.buildCloseArgs(id, reason)
@@ -125,7 +158,7 @@ func (w *IssueWriter) CloseIssue(id, reason string) tea.Cmd {
 
 // DeleteIssue runs bd delete <id> --force
 func (w *IssueWriter) DeleteIssue(id string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpDelete, id)
 	}
 	args := []string{"delete", id, "--force"}
@@ -152,7 +185,7 @@ func (w *IssueWriter) runBatch(op BdOperation, ids []string, args []string) tea.
 	ids = append([]string(nil), ids...)
 	label := strings.Join(ids, " ")
 	cmd := w.unavailableCmd(op, label)
-	if w.available {
+	if w.canRun() {
 		budget := bdRunTimeout + batchPerIDBudget*time.Duration(len(ids))
 		cmd = w.runBdCmdWithTimeout(op, label, args, budget)
 	}
@@ -173,7 +206,7 @@ func (w *IssueWriter) runBatch(op BdOperation, ids []string, args []string) tea.
 // AddComment runs bd comments add <id> -- <text>. The separator keeps text
 // that starts with a dash from being read as a flag.
 func (w *IssueWriter) AddComment(id, text string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpComment, id)
 	}
 	return w.runBdCmd(BdOpComment, id, []string{"comments", "add", id, "--", text})
@@ -181,7 +214,7 @@ func (w *IssueWriter) AddComment(id, text string) tea.Cmd {
 
 // DeferIssue runs bd defer <id> with optional --until flag (bd-j7mx).
 func (w *IssueWriter) DeferIssue(id, until string) tea.Cmd {
-	if !w.available {
+	if !w.canRun() {
 		return w.unavailableCmd(BdOpDefer, id)
 	}
 	args := []string{"defer", id}
@@ -254,14 +287,18 @@ func (w *IssueWriter) runBdCmdWithTimeout(op BdOperation, issueID string, args [
 	if dir == "" {
 		return w.readOnlyCmd(op, issueID)
 	}
-	bdPath := w.bdPath
+	store := w.checkout.Store()
 	return func() tea.Msg {
-		debug.Log("bd-cmd: exec %s %s (dir=%s)", bdPath, strings.Join(args, " "), dir)
 		start := time.Now()
 
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-		outStr, err := bdrun.Run(ctx, bdPath, dir, args...)
+		bdPath, env, err := w.invocation(ctx, store)
+		if err != nil {
+			return BdResultMsg{Operation: op, IssueID: issueID, Error: err}
+		}
+		debug.Log("bd-cmd: exec %s %s (dir=%s)", bdPath, strings.Join(args, " "), dir)
+		outStr, err := bdrun.RunWithEnv(ctx, bdPath, dir, env, args...)
 		elapsed := time.Since(start)
 
 		if err != nil {

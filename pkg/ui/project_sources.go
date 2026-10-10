@@ -15,6 +15,9 @@ var errNoCheckout = errors.New("project has no local checkout")
 // its database as the startup project's Dolt user, the only credential b9s
 // holds for it.
 func (m Model) projectSources(project config.Project) ([]datasource.DataSource, error) {
+	if project.Store != "" {
+		return m.projectBrainSources(project)
+	}
 	if beadsDir, ok := projectBeadsDir(project.ResolvedPath()); ok {
 		return datasource.DiscoverSources(datasource.DiscoveryOptions{
 			BeadsDir:               beadsDir,
@@ -47,6 +50,7 @@ func (m Model) activeRecent() config.RecentProject {
 		Path:     m.activeProjectPath,
 		Database: m.activeProjectServer.Database,
 		Host:     m.activeProjectServer.Host,
+		Store:    m.brain.activeStore,
 	}
 }
 
@@ -56,7 +60,7 @@ func (m Model) activeProject() config.Project {
 			return p
 		}
 	}
-	return config.Project{Name: m.activeProjectName, Path: m.activeProjectPath}
+	return config.Project{Name: m.activeProjectName, Path: m.activeProjectPath, Store: m.brain.activeStore}
 }
 
 // visibleProjects is the header's rows: the recent projects without those the
@@ -96,6 +100,9 @@ func (m Model) activeProjectSlot() int {
 // A checkout keeps its path; projects without one all have an empty path, so
 // they are told apart by server and database instead.
 func projectKey(project config.Project) string {
+	if project.Store != "" {
+		return "brain:" + project.Store
+	}
 	if path := project.ResolvedPath(); path != "" {
 		return path
 	}
@@ -106,6 +113,9 @@ func projectKey(project config.Project) string {
 // checkouts' metadata, and those of projects opened without a checkout, read
 // as the startup user.
 func (m Model) allProjectsDBs() []datasource.DoltDBInfo {
+	if m.brain.registry != nil {
+		return datasource.BrainDBs(m.brain.registry)
+	}
 	return allProjectsDBsFor(m.allProjects, m.startupDoltUser)
 }
 
